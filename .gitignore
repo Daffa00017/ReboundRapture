@@ -1,0 +1,13 @@
+# Unreal Engine noise
+Binaries/
+Intermediate/
+Saved/
+DerivedDataCache/
+.vs/
+*.sln
+*.opensdf
+*.VC.db
+*.log
+
+/.vscode/compileCommands_ProjectJam_BeatEmUp
+/.vscode
