@@ -7,8 +7,14 @@
 #include "Components/CapsuleComponent.h"
 #include "InputActionValue.h"
 #include "Delegates/DelegateCombinations.h"
+#include "GameFramework/CharacterMovementComponent.h"
+#include "PaperFlipbookComponent.h"
+#include "PaperFlipbook.h"
 #include "CPP_PlayerCharacter.generated.h"
 
+class UPaperZDAnimationComponent;
+class UPaperZDAnimSequence;
+class UPaperZDAnimInstance;
 class UInputMappingContext;
 class UInputAction;
 class UEnhancedInputComponent;
@@ -20,7 +26,8 @@ enum class EMovementState : uint8
 	Idle UMETA(DisplayName = "Idle"),
 	Walk UMETA(DisplayName = "Walk"),
 	Aiming UMETA(DisplayName = "Aiming"),
-	SlideOrRoll UMETA(DisplayName = "Slide/Roll"),
+	Slide UMETA(DisplayName = "Slide"),
+	Roll UMETA(DisplayName = "Roll"),
 	WallSlide UMETA(DisplayName = "WallSlide"),
 	Dash UMETA(DisplayName = "Dash"),
 	Jump UMETA(DisplayName = "jump")
@@ -38,6 +45,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnSlideRollStarted, float, Value);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnSlideRollCompleted);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnAimStarted, float, Value);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnAimCompleted);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FAimUpdatedSignature, float, AimAngleDegrees, FVector, AimDirection);
 
 /**
  * 
@@ -52,6 +60,7 @@ public:
 	virtual void BeginPlay() override;
 	virtual void Tick(float DeltaTime) override;
 	void UpdateRotationBasedOnCursor();
+	virtual void Landed(const FHitResult& Hit) override;
 
 	// --- Action delegate instances ---
 	UPROPERTY(BlueprintAssignable, Category = "Input|Delegates") FOnDashStarted        OnDashStartedEvent;
@@ -68,8 +77,102 @@ public:
 
 	UPROPERTY(BlueprintAssignable, Category = "Input|Delegates") FOnAimStarted         OnAimStartedEvent;
 	UPROPERTY(BlueprintAssignable, Category = "Input|Delegates") FOnAimCompleted       OnAimCompletedEvent;
+	// Call every Tick (or only when aiming, up to you)
+	UFUNCTION(BlueprintCallable, Category = "Aim")
+	void UpdateArmAim();
 
+	// Spawn transform aligned with the aim (muzzle)
+	UFUNCTION(BlueprintCallable, Category = "Aim")
+	FTransform GetMuzzleSpawnTransform() const;
+
+	// Broadcast after aim computed (AnimBP can listen)
+	UPROPERTY(BlueprintAssignable, Category = "Aim|Events")
+	FAimUpdatedSignature OnAimUpdated;
+
+	// === Components Arm Rotate===
+	// Pivot we rotate (only around Z/Yaw)
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Arm")
+	TObjectPtr<USceneComponent> ArmPivot;
+
+	// Arm/hand flipbook sprite
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Arm")
+	TObjectPtr<UPaperFlipbookComponent> ArmFlipbook;
+
+	// Muzzle for projectile spawn
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Arm")
+	TObjectPtr<USceneComponent> ArmMuzzle;
+
+	// === Tunables ===
+	// Default flipbook (set in BP or defaults)
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Arm|Config")
+	TObjectPtr<UPaperFlipbook> DefaultArmFlipbook;
+
+	// Where the arm attaches on the body (local, X right, Z up)
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Arm|Config")
+	FVector ArmPivotOffset = FVector(10.f, 0.f, 40.f);
+
+	// Where bullets come out, relative to pivot (local)
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Arm|Config")
+	FVector MuzzleLocalOffset = FVector(30.f, 0.f, 0.f);
+
+	// Allowed aim window when facing RIGHT (degrees around forward = 0°)
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Arm|Clamp")
+	float ArmMinAngleDeg = -80.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Arm|Clamp")
+	float ArmMaxAngleDeg = 80.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Arm|Clamp")
+	bool bClampAim = true;
+
+	// Hide the arm if aiming too far behind
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Arm|Clamp", meta = (ClampMin = "0", ClampMax = "179.9"))
+	float BehindThresholdDeg = 95.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Arm|Clamp")
+	bool bHideWhenBehind = true;
+
+	// Drive the arm flipbook via PaperZD
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Arm|Anim")
+	TObjectPtr<UPaperZDAnimationComponent> ArmAnim;
+
+	// Optional: default anim instance class just for the arm (if you use state machines)
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Arm|Anim")
+	TSubclassOf<UPaperZDAnimInstance> ArmAnimInstanceClass;
+
+	// Optional: a default PaperZD sequence to play on the arm (idle/aim pose)
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Arm|Anim")
+	TObjectPtr<UPaperZDAnimSequence> DefaultArmAnimSequence;
+
+	// If you have a socket on the body flipbook, attach the arm there
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Arm|Attach")
+	FName ArmAttachSocketName = NAME_None; // e.g. "ShoulderSocket"
 	
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Arm|Attach")
+	FName ArmMuzzleSocketName = FName("Muzzle"); // or NAME_None if you don't use a socket
+
+	// --- Arm setup & tuning ---
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Arm|Setup")
+	FVector ArmPivotUserOffset = FVector::ZeroVector;    // extra local offset on top of socket snap
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Arm|Setup")
+	FVector ArmMuzzleUserOffset = FVector::ZeroVector;   // extra local offset on top of MuzzleLocalOffset
+
+	// Bias the final aim so muzzle lines up with the cursor visually.
+	// Convention: +Pitch => tilt DOWN (UE pitch positive is down)
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Arm|Aim")
+	float AimPitchOffsetDeg = 0.f;
+
+	// Optional: if your arm art needs a tiny roll twist
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Arm|Aim")
+	float AimRollOffsetDeg = 0.f;
+
+	// If you ever want to bias yaw (usually keep 0 for Paper2D)
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Arm|Aim")
+	float AimYawOffsetDeg = 0.f;
+
+	UFUNCTION(BlueprintPure, Category = "Arm|Aim")
+	bool GetArmAimDirection(FVector& OutDir) const;
 
 protected:
 
@@ -84,6 +187,25 @@ protected:
 	UPROPERTY()
 	FVector2D ViewportSize;
 	float ThresholdRatio;
+
+	// --- Arm | Runtime state readable by AnimBP or gameplay ---
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Arm|State")
+	float ArmAimAngleDeg = 0.f;          // final pitch we applied (deg)
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Arm|State")
+	FVector ArmAimDir = FVector::ForwardVector; // forward on XZ from pitch
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Arm|State")
+	bool bArmIsAiming = false;           // e.g., tie to bAimInput
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Arm|State")
+	bool bArmFacingLeft = false;         // mirrors your bLookingBack
+
+	// --- Arm | Tuning ---
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Arm|Clamp")
+	bool bInvertAimPitch = true;         // makes mouse up => arm up
+
 
 
 	// Distance from character screen position to trigger rotation
@@ -106,6 +228,9 @@ protected:
 	UFUNCTION(BlueprintCallable, Category = "Movement")
 	void ChangeMovementState(EMovementState NewState);
 
+	UFUNCTION(BlueprintNativeEvent, Category = "Movement")
+	void CustomEventOnLanded(FHitResult HitResult);
+
 	UPROPERTY(EditAnywhere, Category = "Movement|Tuning")
 	float WalkSpeedThreshold = 50.f;
 
@@ -114,6 +239,19 @@ protected:
 
 	UPROPERTY(EditAnywhere, Category = "Movement|Tuning")
 	float WalkCommitDelay = 0.03f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Movement|State")
+	bool bIsFalling = false;
+
+	bool IsGrounded() const;
+
+	bool bIsChangingState = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movement|State")
+	int MaxJumpCount = 2;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movement|State", meta = (ClampMin = "0", ClampMax = "5", DisplayPriority = "1"))
+	int CurrentJumpCount;
 
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Movement", meta = (AllowPrivateAccess = "true"))
@@ -158,6 +296,17 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Input|State")
 	bool bAimInput = false;
+
+	bool GetCursorWorldOnCharacterPlane(FVector& OutWorld) const;
+
+	// Facing-aware clamp/mirror
+	float GetFinalArmAngleDegrees(float RawAngleDeg, bool bFacingLeft) const;
+
+	// If you want to make these live-editable in editor
+	virtual void OnConstruction(const FTransform& Transform) override;
+
+	// Helper to re-apply offsets cleanly (constructor/BeginPlay/OnConstruction)
+	void ApplyArmAttachmentOffsets();
 	
 
 private:
@@ -172,6 +321,8 @@ private:
 	double LastInputPressedTime = 0.0;
 	FTimerHandle IdleConfirmTimer;
 	FTimerHandle WalkCommitTimer;
+
+	//UPROPERTY()
 
 
 	//Input Asset
@@ -200,6 +351,9 @@ private:
 	UInputAction* AimAction = nullptr;
 
 	EMovementState LastMovementState = EMovementState::Idle;
+
+	// cached XZ unit vector (for muzzle rotation)
+	FVector LastAimDir = FVector::ForwardVector;
 
 
 	//Input Function

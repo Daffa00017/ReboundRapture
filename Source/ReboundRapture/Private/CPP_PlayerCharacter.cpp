@@ -1,47 +1,160 @@
 ﻿// Fill out your copyright notice in the Description page of Project Settings.
 
-
+//CPP_PlayerCharacter
 #include "CPP_PlayerCharacter.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "InputMappingContext.h"
 #include "InputAction.h"
+#include "Kismet/KismetMathLibrary.h"
+#include "Camera/PlayerCameraManager.h"
+#include "Components/SceneComponent.h"
+#include "Kismet/GameplayStatics.h"
+#include "GameFramework/CharacterMovementComponent.h"
+#include "PaperZDAnimationComponent.h"
+//#include "PaperZDAnimSequence.h"
+#include "PaperZDAnimInstance.h"
+#include "PaperFlipbookComponent.h"
 #include "GameFramework/PlayerController.h"
 
 ACPP_PlayerCharacter::ACPP_PlayerCharacter()
 {
-    // Set this character to call Tick() every frame
     PrimaryActorTick.bCanEverTick = true;
 
-    // Create ShieldComponent instance
-
     ViewportSize = FVector2D::ZeroVector;
+
+    USceneComponent* const AttachParent =
+        GetCapsuleComponent() ? static_cast<USceneComponent*>(GetCapsuleComponent())
+        : GetRootComponent();
+
+    // --- ArmPivot ---
+    ArmPivot = CreateDefaultSubobject<USceneComponent>(TEXT("PC_ArmPivot"));
+    ArmPivot->SetupAttachment(AttachParent);
+    ArmPivot->SetRelativeLocation(ArmPivotOffset);
+
+    // --- ArmFlipbook ---
+    ArmFlipbook = CreateDefaultSubobject<UPaperFlipbookComponent>(TEXT("PC_ArmFlipbook"));
+    ArmFlipbook->SetupAttachment(ArmPivot);
+    ArmFlipbook->SetRelativeLocation(FVector::ZeroVector);
+    ArmFlipbook->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    ArmFlipbook->SetGenerateOverlapEvents(false);
+
+    // --- ArmMuzzle ---
+    ArmMuzzle = CreateDefaultSubobject<USceneComponent>(TEXT("PC_ArmMuzzle"));
+    ArmMuzzle->SetupAttachment(ArmPivot);
+    ArmMuzzle->SetRelativeLocation(MuzzleLocalOffset);
+
+    // --- PaperZD anim component that will drive ArmFlipbook ---
+    ArmAnim = CreateDefaultSubobject<UPaperZDAnimationComponent>(TEXT("PC_ArmAnim"));
+    // NOTE: we set its RenderComponent in BeginPlay/PostInit, once all components are fully created.
 }
 
 void ACPP_PlayerCharacter::BeginPlay()
 {
     Super::BeginPlay();
+
+    // --- your existing input & viewport setup ---
     CachedPlayerController = GetWorld()->GetFirstPlayerController();
     if (CachedPlayerController)
+    {
+        int32 ViewportWidth = 0, ViewportHeight = 0;
+        CachedPlayerController->GetViewportSize(ViewportWidth, ViewportHeight);
+
+        ViewportSize = FVector2D((float)ViewportWidth, (float)ViewportHeight);
+
+        if (UEnhancedInputLocalPlayerSubsystem* Subsystem =
+            ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(CachedPlayerController->GetLocalPlayer()))
         {
-            // Temporary int32 variables for GetViewportSize
-            int32 ViewportWidth = 0, ViewportHeight = 0;
-            CachedPlayerController->GetViewportSize(ViewportWidth, ViewportHeight);
-
-            // Convert to float and store in FVector2D
-            ViewportSize.X = static_cast<float>(ViewportWidth);
-            ViewportSize.Y = static_cast<float>(ViewportHeight);
-
-            if (UEnhancedInputLocalPlayerSubsystem* Subsystem =
-                ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(CachedPlayerController->GetLocalPlayer()))
+            if (DefaultMappingContext)
             {
-                if (DefaultMappingContext) // Assign in editor or load via ConstructorHelpers
-                {
-                    Subsystem->AddMappingContext(DefaultMappingContext, 0);
-                }
+                Subsystem->AddMappingContext(DefaultMappingContext, 0);
             }
         }
-        ThresholdRatio = CursorRotationThreshold / 1920.f;
+    }
+
+    ThresholdRatio = CursorRotationThreshold / 1920.f;
+
+    // --- find the main/body flipbook created by your PaperZD parent ---
+    UPaperFlipbookComponent* BodyFlipbook = nullptr;
+
+    // If your parent exposes a getter like GetSprite()/GetRenderComponent(), prefer that.
+    // BodyFlipbook = GetSprite();
+
+    if (!BodyFlipbook)
+    {
+        TArray<UPaperFlipbookComponent*> Flipbooks;
+        GetComponents<UPaperFlipbookComponent>(Flipbooks);
+        for (UPaperFlipbookComponent* FB : Flipbooks)
+        {
+            if (FB && FB != ArmFlipbook) { BodyFlipbook = FB; break; }
+        }
+    }
+
+    // --- reattach ArmPivot under the body flipbook (optionally to a socket) ---
+    if (BodyFlipbook && ArmPivot)
+    {
+        const FName ShoulderSocket = ArmAttachSocketName; // can be NAME_None
+
+        // Snap so we don't keep old offsets
+        if (ShoulderSocket != NAME_None)
+        {
+            ArmPivot->AttachToComponent(
+                BodyFlipbook,
+                FAttachmentTransformRules::SnapToTargetNotIncludingScale,
+                ShoulderSocket
+            );
+        }
+        else
+        {
+            ArmPivot->AttachToComponent(
+                BodyFlipbook,
+                FAttachmentTransformRules::SnapToTargetNotIncludingScale
+            );
+        }
+
+        // Force local zero if you want exact (0,0,0) relative to the parent/socket
+        ArmPivot->SetRelativeLocation(FVector::ZeroVector);
+        ArmPivot->SetRelativeRotation(FRotator::ZeroRotator);
+        // keep parent scale; pivot scale should usually be 1
+        ArmPivot->SetRelativeScale3D(FVector::OneVector);
+
+        // If you still want an offset later, set it here instead of constructor:
+        // ArmPivot->AddRelativeLocation(ArmPivotOffset);
+        }
+
+    if (ArmMuzzle && ArmFlipbook)
+    {
+        if (ArmMuzzleSocketName != NAME_None)
+        {
+            // Snap to the flipbook's socket
+            ArmMuzzle->AttachToComponent(
+                ArmFlipbook,
+                FAttachmentTransformRules::SnapToTargetNotIncludingScale,
+                ArmMuzzleSocketName
+            );
+            // ensure clean local xform
+            ArmMuzzle->SetRelativeLocation(FVector::ZeroVector);
+            ArmMuzzle->SetRelativeRotation(FRotator::ZeroRotator);
+            ArmMuzzle->SetRelativeScale3D(FVector::OneVector);
+        }
+        else
+        {
+            // No socket: just attach to the flipbook and use your offset
+            ArmMuzzle->AttachToComponent(
+                ArmFlipbook,
+                FAttachmentTransformRules::KeepRelativeTransform
+            );
+            ArmMuzzle->SetRelativeLocation(MuzzleLocalOffset);
+            ArmMuzzle->SetRelativeRotation(FRotator::ZeroRotator);
+        }
+    }
+    if (ArmPivot)
+    {
+        // world rotation won’t be affected by parent negative scale flips
+        ArmPivot->SetUsingAbsoluteRotation(true);  // public API; don’t touch bAbsoluteRotation directly
+    }
+
+    ApplyArmAttachmentOffsets();
 }
 
 void ACPP_PlayerCharacter::Tick(float DeltaTime)
@@ -52,6 +165,7 @@ void ACPP_PlayerCharacter::Tick(float DeltaTime)
     const bool bShouldUpdate = (CurrentTime - LastRotationUpdateTime) >= RotationUpdateInterval;
 
         UpdateRotationBasedOnCursor();
+        UpdateArmAim();
 
     if (IsPlayerControlled() && UseControlRotation)
     {
@@ -87,6 +201,19 @@ void ACPP_PlayerCharacter::UpdateRotationBasedOnCursor()
     }
 }
 
+
+bool ACPP_PlayerCharacter::GetArmAimDirection(FVector& OutDir) const
+{
+    if (!ArmPivot) return false;
+
+    // Read the rotation you already set in UpdateArmAim() (mirror/offset/clamp applied)
+    FVector Dir = ArmPivot->GetComponentRotation().Vector();
+    Dir.Y = 0.f; // lock to side-scroller plane
+    if (!Dir.Normalize()) return false;
+
+    OutDir = Dir;
+    return true;
+}
 
 void ACPP_PlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
 {
@@ -149,15 +276,169 @@ void ACPP_PlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInpu
     }
 }
 
+void ACPP_PlayerCharacter::Landed(const FHitResult& Hit)
+{
+    CurrentJumpCount = 0;
+    Super::Landed(Hit);
+    bIsFalling = false;
+    GetWorldTimerManager().ClearTimer(IdleConfirmTimer);  // kill any pending idle confirm
+    CustomEventOnLanded(Hit);
+
+    // resolve to ground locomotion
+    if (bLeftHeld || bRightHeld)
+        ChangeMovementState(EMovementState::Walk);
+    else
+        ChangeMovementState(EMovementState::Idle);
+}
+
+void ACPP_PlayerCharacter::UpdateArmAim()
+{
+    if (!ArmPivot) return;
+
+    // 1) Cursor → intersection on side-scroller plane (Y = Actor.Y)
+    FVector HitOnPlane;
+    if (!GetCursorWorldOnCharacterPlane(HitOnPlane))
+        return;
+
+    // 2) EXACTLY like your BP: Start = ActorLocation (not pivot)
+    const FVector ActorLoc = GetActorLocation();
+    const FRotator Look = UKismetMathLibrary::FindLookAtRotation(ActorLoc, HitOnPlane);
+
+    // 3) Build the same relative rot: Pitch from Look.Pitch, Yaw=0, Roll from Look.Roll
+    float Pitch = Look.Pitch;
+    float Roll = Look.Roll;
+
+    // Keep BP feel: when facing left, mirror ONLY pitch so mouse up = arm up
+    if (bLookingBack)
+    {
+        Pitch = -Pitch;
+        // If your asset needs roll mirrored too, uncomment:
+        // Roll = -Roll;
+    }
+
+    // 3.5) Apply your editor biases to line muzzle/cursor up
+    Pitch += bLookingBack ? -AimPitchOffsetDeg : AimPitchOffsetDeg;
+    const float Yaw = AimYawOffsetDeg;      // stays 0 for pure 2D setups
+    Roll += AimRollOffsetDeg;
+
+    // Optional clamp (after bias)
+    if (bClampAim)
+    {
+        Pitch = FMath::Clamp(Pitch, ArmMinAngleDeg, ArmMaxAngleDeg);
+    }
+
+    // 4) Apply RELATIVE rotation (same as K2_SetRelativeRotation in your BP)
+    const FRotator RelativeRot(/*Pitch*/ Pitch, /*Yaw*/ Yaw, /*Roll*/ Roll);
+    ArmPivot->SetRelativeRotation(RelativeRot);
+
+    // 5) Keep sprite flip purely visual (no double-rotation)
+    if (ArmFlipbook)
+    {
+        ArmFlipbook->SetRelativeScale3D(FVector(bLookingBack ? -1.f : 1.f, 1.f, 1.f));
+    }
+}
+
+FTransform ACPP_PlayerCharacter::GetMuzzleSpawnTransform() const
+{
+    const FVector SpawnLoc = ArmMuzzle
+        ? ArmMuzzle->GetComponentLocation()
+        : (ArmPivot ? ArmPivot->GetComponentLocation() : GetActorLocation());
+
+    // Forward from the current pitch on Y axis (same basis as UpdateArmAim)
+    const FRotator PivotRel = ArmPivot ? ArmPivot->GetRelativeRotation() : FRotator::ZeroRotator;
+    FVector Forward = FRotationMatrix(FRotator(PivotRel.Pitch, 0.f, 0.f)).GetUnitAxis(EAxis::X);
+    Forward.Y = 0.f; // keep on XZ plane
+    Forward.Normalize();
+
+    const FRotator AimRot = FRotationMatrix::MakeFromXZ(Forward, FVector::UpVector).Rotator();
+    return FTransform(AimRot, SpawnLoc, FVector(1.f));
+}
+
 void ACPP_PlayerCharacter::ChangeMovementState(EMovementState NewState)
 {
     if (NewState == CurrentMovementState) return;
+
     const EMovementState Old = CurrentMovementState;
     CurrentMovementState = NewState;
+
+    // optional: clear idle timer on explicit state changes
+    GetWorldTimerManager().ClearTimer(IdleConfirmTimer);
+
     OnMovementStateChanged.Broadcast(Old, CurrentMovementState);
 }
 
 
+void ACPP_PlayerCharacter::CustomEventOnLanded_Implementation(FHitResult HitResult)
+{
+    // Optional: default behavior
+    UE_LOG(LogTemp, Warning, TEXT("CustomEventOnLanded called in C++"));
+}
+
+
+
+
+bool ACPP_PlayerCharacter::GetCursorWorldOnCharacterPlane(FVector& OutWorld) const
+{
+    APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), 0);
+    if (!PC) return false;
+
+    FVector WL, WD;
+    if (!PC->DeprojectMousePositionToWorld(WL, WD))
+        return false;
+
+    // Intersect with plane Y = Actor.Y, exactly as your BP math did
+    const double ActorY = (double)GetActorLocation().Y;
+    const double DeltaY = ActorY - (double)WL.Y;
+    const double DirY = (double)WD.Y;
+
+    // BP used SelectFloat( (DirY == 0) ? DeltaY : (DeltaY / DirY) )
+    const double t = FMath::IsNearlyZero(DirY) ? DeltaY : (DeltaY / DirY);
+
+    OutWorld = WL + WD * (float)t;
+    return true;
+}
+
+float ACPP_PlayerCharacter::GetFinalArmAngleDegrees(float RawAngleDeg, bool bFacingLeft) const
+{
+    float Pitch = RawAngleDeg;
+
+    // If your visuals are mirrored when facing left, invert pitch for “natural” wrist
+    // (this matches what usually happens when scaling X to -1 for left).
+    if (bFacingLeft)
+    {
+        Pitch = -Pitch;
+    }
+
+    // Optional clamp window, e.g. -80..+80
+    if (bClampAim)
+    {
+        Pitch = FMath::Clamp(Pitch, ArmMinAngleDeg, ArmMaxAngleDeg);
+    }
+
+    return Pitch;
+}
+
+void ACPP_PlayerCharacter::OnConstruction(const FTransform& Transform)
+{
+    Super::OnConstruction(Transform);
+    ApplyArmAttachmentOffsets();
+}
+
+void ACPP_PlayerCharacter::ApplyArmAttachmentOffsets()
+{
+    // Pivot: apply extra local offset after whatever attachment you already did
+    if (ArmPivot)
+    {
+        // Keep current attach; just ensure local offset is what you want
+        ArmPivot->SetRelativeLocation(ArmPivotUserOffset);
+    }
+
+    // Muzzle: add user offset on top of your default
+    if (ArmMuzzle)
+    {
+        ArmMuzzle->SetRelativeLocation(MuzzleLocalOffset + ArmMuzzleUserOffset);
+    }
+}
 
 bool ACPP_PlayerCharacter::GetCharacterScreenPosition(FVector2D& OutPos) const
 {
@@ -176,153 +457,149 @@ void ACPP_PlayerCharacter::MoveHorizontal(const FInputActionValue& Value)
     AddMovementInput(FVector(1.f, 0.f, 0.f), AxisValue);
 }
 
-// === LEFT ===
-void ACPP_PlayerCharacter::OnMoveLeftStarted(const FInputActionValue& Value)
+bool ACPP_PlayerCharacter::IsGrounded() const
+{
+    const UCharacterMovementComponent* CM = GetCharacterMovement();
+    if (!CM) return false;
+    // bAirborne is our lock; sometimes CM flickers for a frame
+    return !bIsFalling && !CM->IsFalling() && CM->IsMovingOnGround();
+}
+
+void ACPP_PlayerCharacter::OnMoveLeftStarted(const FInputActionValue&)
 {
     bLeftHeld = true;
-
     const int Combined = GetCombinedAxis();
-    const bool bBothHeld = (bLeftHeld && bRightHeld);
+    const bool bBoth = (bLeftHeld && bRightHeld);
 
-    // any directed input cancels idle and commits Walk
     if (Combined != 0)
     {
         GetWorldTimerManager().ClearTimer(IdleConfirmTimer);
-        if (CurrentMovementState != EMovementState::Walk)
+        if (IsGrounded() && CurrentMovementState != EMovementState::Walk)
             ChangeMovementState(EMovementState::Walk);
     }
 
-    // edge: just entered both-held? schedule idle once
-    if (bBothHeld && !bWasBothHeld)
+    if (bBoth && !bWasBothHeld && IsGrounded())
     {
         ScheduleIdleConfirm();
         bWasBothHeld = true;
     }
 }
 
-void ACPP_PlayerCharacter::OnMoveLeftTriggered(const FInputActionValue& Value)
+void ACPP_PlayerCharacter::OnMoveLeftTriggered(const FInputActionValue&)
 {
     bLeftHeld = true;
     RecomputeAxisAndSpeed();
 
     const int Combined = GetCombinedAxis();
-    const bool bBothHeld = (bLeftHeld && bRightHeld);
+    const bool bBoth = (bLeftHeld && bRightHeld);
 
     if (Combined != 0)
     {
-        // directed → keep/cancel idle
         GetWorldTimerManager().ClearTimer(IdleConfirmTimer);
-        if (CurrentMovementState != EMovementState::Walk)
+        if (IsGrounded() && CurrentMovementState != EMovementState::Walk)
             ChangeMovementState(EMovementState::Walk);
     }
-    else
+
+    if (bBoth && !bWasBothHeld && IsGrounded())
     {
-        // undirected (both-held) — only schedule on edge
-        if (bBothHeld && !bWasBothHeld)
-        {
-            ScheduleIdleConfirm();
-            bWasBothHeld = true;
-        }
+        ScheduleIdleConfirm();
+        bWasBothHeld = true;
     }
 }
 
-void ACPP_PlayerCharacter::OnMoveLeftCompleted(const FInputActionValue& Value)
+void ACPP_PlayerCharacter::OnMoveLeftCompleted(const FInputActionValue&)
 {
     bLeftHeld = false;
     RecomputeAxisAndSpeed();
 
     const int Combined = GetCombinedAxis();
-    const bool bBothHeld = (bLeftHeld && bRightHeld);
+    const bool bBoth = (bLeftHeld && bRightHeld);
 
     if (!bRightHeld)
     {
-        // both released → schedule idle
-        ScheduleIdleConfirm();
+        if (IsGrounded()) ScheduleIdleConfirm();
     }
     else
     {
-        // we left both-held? clear the pending idle
-        if (!bBothHeld && bWasBothHeld)
+        if (!bBoth && bWasBothHeld)
         {
             GetWorldTimerManager().ClearTimer(IdleConfirmTimer);
             bWasBothHeld = false;
         }
 
-        // if now directed, ensure Walk
-        if (Combined != 0 && CurrentMovementState != EMovementState::Walk)
+        if (Combined != 0 && IsGrounded() && CurrentMovementState != EMovementState::Walk)
             ChangeMovementState(EMovementState::Walk);
     }
 }
 
 // === RIGHT (mirror) ===
-void ACPP_PlayerCharacter::OnMoveRightStarted(const FInputActionValue& Value)
+void ACPP_PlayerCharacter::OnMoveRightStarted(const FInputActionValue&)
 {
     bRightHeld = true;
-
     const int Combined = GetCombinedAxis();
-    const bool bBothHeld = (bLeftHeld && bRightHeld);
+    const bool bBoth = (bLeftHeld && bRightHeld);
 
     if (Combined != 0)
     {
         GetWorldTimerManager().ClearTimer(IdleConfirmTimer);
-        if (CurrentMovementState != EMovementState::Walk)
+        if (IsGrounded() && CurrentMovementState != EMovementState::Walk)
             ChangeMovementState(EMovementState::Walk);
     }
-    if (bBothHeld && !bWasBothHeld)
+
+    if (bBoth && !bWasBothHeld && IsGrounded())
     {
         ScheduleIdleConfirm();
         bWasBothHeld = true;
     }
 }
 
-void ACPP_PlayerCharacter::OnMoveRightTriggered(const FInputActionValue& Value)
+void ACPP_PlayerCharacter::OnMoveRightTriggered(const FInputActionValue&)
 {
     bRightHeld = true;
     RecomputeAxisAndSpeed();
 
     const int Combined = GetCombinedAxis();
-    const bool bBothHeld = (bLeftHeld && bRightHeld);
+    const bool bBoth = (bLeftHeld && bRightHeld);
 
     if (Combined != 0)
     {
         GetWorldTimerManager().ClearTimer(IdleConfirmTimer);
-        if (CurrentMovementState != EMovementState::Walk)
+        if (IsGrounded() && CurrentMovementState != EMovementState::Walk)
             ChangeMovementState(EMovementState::Walk);
     }
-    else
+
+    if (bBoth && !bWasBothHeld && IsGrounded())
     {
-        if (bBothHeld && !bWasBothHeld)
-        {
-            ScheduleIdleConfirm();
-            bWasBothHeld = true;
-        }
+        ScheduleIdleConfirm();
+        bWasBothHeld = true;
     }
 }
 
-void ACPP_PlayerCharacter::OnMoveRightCompleted(const FInputActionValue& Value)
+void ACPP_PlayerCharacter::OnMoveRightCompleted(const FInputActionValue&)
 {
     bRightHeld = false;
     RecomputeAxisAndSpeed();
 
     const int Combined = GetCombinedAxis();
-    const bool bBothHeld = (bLeftHeld && bRightHeld);
+    const bool bBoth = (bLeftHeld && bRightHeld);
 
     if (!bLeftHeld)
     {
-        ScheduleIdleConfirm(); // both released
+        if (IsGrounded()) ScheduleIdleConfirm();
     }
     else
     {
-        if (!bBothHeld && bWasBothHeld)
+        if (!bBoth && bWasBothHeld)
         {
             GetWorldTimerManager().ClearTimer(IdleConfirmTimer);
             bWasBothHeld = false;
         }
 
-        if (Combined != 0 && CurrentMovementState != EMovementState::Walk)
+        if (Combined != 0 && IsGrounded() && CurrentMovementState != EMovementState::Walk)
             ChangeMovementState(EMovementState::Walk);
     }
 }
+
 void ACPP_PlayerCharacter::RecomputeAxisAndSpeed()
 {
     const int Combined = GetCombinedAxis();
@@ -375,19 +652,21 @@ void ACPP_PlayerCharacter::UpdateMovementStateFromAxis()
 
 void ACPP_PlayerCharacter::ScheduleIdleConfirm()
 {
+    // ✅ ignore while in air
+    if (!IsGrounded()) return;  // never idle mid-air
     GetWorldTimerManager().ClearTimer(IdleConfirmTimer);
     GetWorldTimerManager().SetTimer(
-        IdleConfirmTimer, this, &ACPP_PlayerCharacter::ConfirmIdle,
+        IdleConfirmTimer, this, &ThisClass::ConfirmIdle,
         IdleConfirmDelay, false
     );
 }
 
 void ACPP_PlayerCharacter::ConfirmIdle()
 {
-    if (GetCombinedAxis() == 0) // both-held OR none-held
-    {
+    // ✅ also bail if we somehow became airborne
+    if (!IsGrounded()) return;
+    if (GetCombinedAxis() == 0)
         ChangeMovementState(EMovementState::Idle);
-    }
 }
 
 void ACPP_PlayerCharacter::CommitWalkIfStillDirected()
@@ -423,10 +702,18 @@ void ACPP_PlayerCharacter::OnDashCompleted(const FInputActionValue& /*Value*/)
 // === JUMP ===
 void ACPP_PlayerCharacter::OnJumpStarted(const FInputActionValue& Value)
 {
-    bJumpInput = true;
-    OnJumpStartedEvent.Broadcast(GetScalar01(Value));
-    // TODO: Call Jump(); or custom jump logic
-    Jump();
+    if (CurrentJumpCount < MaxJumpCount) {
+        bJumpInput = true;
+        bIsFalling = true;
+        OnJumpStartedEvent.Broadcast(GetScalar01(Value));
+        GetWorldTimerManager().ClearTimer(IdleConfirmTimer);
+        // TODO: Call Jump(); or custom jump logic
+        CurrentJumpCount = CurrentJumpCount + 1 ;
+        Jump();
+        ChangeMovementState(EMovementState::Jump);
+        //UE_LOG(LogTemp, Warning, TEXT("JumpCount: %d"), CurrentJumpCount);
+    }
+
 }
 
 void ACPP_PlayerCharacter::OnJumpTriggered(const FInputActionValue& Value)
@@ -505,5 +792,6 @@ void ACPP_PlayerCharacter::OnAimCompleted(const FInputActionValue& /*Value*/)
     OnAimCompletedEvent.Broadcast();
     // Optional: bIsAiming = false; restore FOV/speed
 }
+
 
 

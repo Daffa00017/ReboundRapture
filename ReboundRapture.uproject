@@ -11,7 +11,8 @@
 			"AdditionalDependencies": [
 				"Paper2D",
 				"PaperZD",
-				"Engine"
+				"Engine",
+				"AIModule"
 			]
 		}
 	],
@@ -151,6 +152,10 @@
 		},
 		{
 			"Name": "GooglePAD",
+			"Enabled": false
+		},
+		{
+			"Name": "UdpMessaging",
 			"Enabled": false
 		}
 	]
