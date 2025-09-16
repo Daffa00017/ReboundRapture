@@ -164,8 +164,11 @@ void ACPP_PlayerCharacter::Tick(float DeltaTime)
     const float CurrentTime = GetWorld()->GetTimeSeconds();
     const bool bShouldUpdate = (CurrentTime - LastRotationUpdateTime) >= RotationUpdateInterval;
 
+    if (IsPlayerControlled() && UseUpdateArmAim)
+    {
         UpdateRotationBasedOnCursor();
         UpdateArmAim();
+    }
 
     if (IsPlayerControlled() && UseControlRotation)
     {

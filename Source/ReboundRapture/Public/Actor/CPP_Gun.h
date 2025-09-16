@@ -6,6 +6,7 @@
 #include "GameFramework/Actor.h"
 #include "PaperFlipbookComponent.h"
 #include "PaperFlipbook.h"
+#include "GameFramework/DamageType.h"
 #include "CPP_Gun.generated.h"
 
 UCLASS()
@@ -71,6 +72,14 @@ public:
 
 	UFUNCTION(BlueprintNativeEvent, Category = "Fire")
 	void ShootOnHit(FHitResult ShootResult);
+
+	//Hit Event Variable
+
+	UPROPERTY(EditAnywhere, Category = "Fire|HitVariable")
+	float Damage = 24.f;
+
+	UPROPERTY(EditAnywhere, Category = "Fire|HitVariable")
+	TSubclassOf<UDamageType> DamageTypeClass;
 
 
 protected:

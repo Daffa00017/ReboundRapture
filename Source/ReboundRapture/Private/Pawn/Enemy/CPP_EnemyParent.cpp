@@ -4,10 +4,13 @@
 #include "Pawn/Enemy/CPP_EnemyParent.h"
 
 #include "Components/CapsuleComponent.h"
+#include "PaperZDAnimationComponent.h"
+#include "PaperZDAnimInstance.h"
 #include "PaperFlipbookComponent.h"
 #include "GameFramework/FloatingPawnMovement.h"
 #include "Kismet/GameplayStatics.h"
 #include "AIController.h"
+
 
 // Sets default values
 ACPP_EnemyParent::ACPP_EnemyParent()
@@ -36,6 +39,16 @@ ACPP_EnemyParent::ACPP_EnemyParent()
 	// Allow AI possession
 	AutoPossessAI = EAutoPossessAI::PlacedInWorldOrSpawned;
 	// We'll set AIControllerClass from C++ or the Blueprint (see controller below)
+
+	BodyAnim = CreateDefaultSubobject<UPaperZDAnimationComponent>(TEXT("PC_BodyAnim"));
+}
+
+void ACPP_EnemyParent::SetAIMoveState(EAIMovementState NewState)
+{
+	if (AIMoveState == NewState) return;      // no spam
+	const EAIMovementState Old = AIMoveState;
+	AIMoveState = NewState;
+	OnAIMoveStateChanged.Broadcast(Old, NewState);
 }
 
 // Called when the game starts or when spawned

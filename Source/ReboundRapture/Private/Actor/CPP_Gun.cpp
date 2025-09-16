@@ -23,6 +23,7 @@ ACPP_Gun::ACPP_Gun()
 	Muzzle = CreateDefaultSubobject<USceneComponent>(TEXT("PC_Muzzle"));
 	Muzzle->SetupAttachment(GunFlipbook);
 
+    DamageTypeClass = UDamageType::StaticClass();
 
 }
 
@@ -117,7 +118,7 @@ void ACPP_Gun::CoreHitscanFromMuzzle_PastCursor()
     if (bHit)
     {
         // Apply damage/impact here
-        // UGameplayStatics::ApplyPointDamage(Hit.GetActor(), Damage, Dir, Hit, nullptr, this, DamageTypeClass);
+        UGameplayStatics::ApplyPointDamage(Hit.GetActor(), Damage, Dir, Hit, nullptr, this, DamageTypeClass);
         ShootOnHit(Hit);
     }
     else

@@ -3,6 +3,8 @@
 
 #include "CoreMinimal.h"
 #include "BehaviorTree/BTTaskNode.h"
+#include "Enum/AIMovementState.h"
+#include "Pawn/Enemy/CPP_EnemyParent.h"
 #include "BTT_MaintainDistance2D.generated.h"
 
 /**
@@ -33,7 +35,7 @@ public:
 
 	// Distance band
 	UPROPERTY(EditAnywhere, Category = "Move") float PreferMin = 450.f;
-	UPROPERTY(EditAnywhere, Category = "Move") float PreferMax = 650.f;
+	UPROPERTY(EditAnywhere, Category = "Move") float PreferMax = 550.f;
 	UPROPERTY(EditAnywhere, Category = "Move") float BandEpsilon = 40.f;
 
 	// Grounding
@@ -75,4 +77,13 @@ private:
 	bool ChooseNewStrafeGoal(class UWorld* W, const FVector& Me, const FVector& Player, float& OutGoalX);
 	bool ProjectGroundAtX(class UWorld* W, float X, float StartZ, float Y, FVector& OutGround) const;
 	bool HasLOSFrom(class UWorld* W, const FVector& From, const AActor* To) const;
+
+	static FORCEINLINE void SetAIMoveStateIfEnemy(APawn* P, EAIMovementState NewState)
+	{
+		if (ACPP_EnemyParent* E = Cast<ACPP_EnemyParent>(P))
+		{
+			E->SetAIMoveState(NewState);
+		}
+	}
+
 };

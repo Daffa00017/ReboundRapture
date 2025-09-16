@@ -77,6 +77,10 @@ public:
 
 	UPROPERTY(BlueprintAssignable, Category = "Input|Delegates") FOnAimStarted         OnAimStartedEvent;
 	UPROPERTY(BlueprintAssignable, Category = "Input|Delegates") FOnAimCompleted       OnAimCompletedEvent;
+
+	UPROPERTY(EditAnywhere,BlueprintReadWrite, category = "Arm")
+	bool UseUpdateArmAim = false;
+
 	// Call every Tick (or only when aiming, up to you)
 	UFUNCTION(BlueprintCallable, Category = "Aim")
 	void UpdateArmAim();

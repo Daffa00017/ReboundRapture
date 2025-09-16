@@ -157,6 +157,59 @@
 		{
 			"Name": "UdpMessaging",
 			"Enabled": false
+		},
+		{
+			"Name": "CryptoKeys",
+			"Enabled": false
+		},
+		{
+			"Name": "ControlRigModules",
+			"Enabled": false
+		},
+		{
+			"Name": "Fab",
+			"Enabled": false
+		},
+		{
+			"Name": "IKRig",
+			"Enabled": false
+		},
+		{
+			"Name": "Metasound",
+			"Enabled": false
+		},
+		{
+			"Name": "NiagaraSimCaching",
+			"Enabled": false
+		},
+		{
+			"Name": "NNEDenoiser",
+			"Enabled": false,
+			"SupportedTargetPlatforms": [
+				"Win64",
+				"Linux",
+				"Mac"
+			]
+		},
+		{
+			"Name": "ResonanceAudio",
+			"Enabled": false
+		},
+		{
+			"Name": "SkeletalMeshModelingTools",
+			"Enabled": false
+		},
+		{
+			"Name": "SkeletalReduction",
+			"Enabled": false
+		},
+		{
+			"Name": "NFORDenoise",
+			"Enabled": false,
+			"SupportedTargetPlatforms": [
+				"Win64",
+				"Linux"
+			]
 		}
 	]
 }

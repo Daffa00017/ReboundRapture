@@ -45,31 +45,67 @@ void UBTT_MaintainDistance2D::TickTask(UBehaviorTreeComponent& OwnerComp, uint8*
 	const FVector Me = P->GetActorLocation();
 	const FVector To = Target->GetActorLocation();
 
-	float d = DistXZ(Me, To);
+	const float d = DistXZ(Me, To);
 	const float dx = To.X - Me.X;
 
-	// --- Outside band: close in / back off ---
+	// Optional: helper lambdas to cleanly set state/speed
+	auto SetState = [P](EAIMovementState S)
+		{
+			if (auto* E = Cast<ACPP_EnemyParent>(P)) { E->SetAIMoveState(S); }
+		};
+	auto SetSpeedForState = [P](EAIMovementState S)
+		{
+			if (auto* Move = P->FindComponentByClass<UFloatingPawnMovement>())
+			{
+				if (auto* E = Cast<ACPP_EnemyParent>(P))
+				{
+					if (S == EAIMovementState::Run)  Move->MaxSpeed = E->RunSpeed;
+					else if (S == EAIMovementState::Walk) Move->MaxSpeed = E->WalkSpeed;
+				}
+			}
+		};
+
+	// =============== Outside band: close in / back off ===============
 	if (d > PreferMax + BandEpsilon)
 	{
+		// too far → go toward player
 		bHasGoalX = false;
 		Flip(P, dx);
+
+		// Decide sprint vs walk; tweak 1.5f if you want earlier sprinting
+		const bool bSprint = (d > PreferMax * 1.0f);
+
 		P->AddMovementInput(FVector(FMath::Sign(dx), 0.f, 0.f), 1.f);
+
+		SetState(bSprint ? EAIMovementState::Run : EAIMovementState::Walk);
+		SetSpeedForState(bSprint ? EAIMovementState::Run : EAIMovementState::Walk);
+
 		if (bSnapToGround) Snap(P);
 		return;
 	}
 	if (d < PreferMin - BandEpsilon)
 	{
+		// too close → back off
 		bHasGoalX = false;
 		Flip(P, -dx);
+
+		// Sprint if *way* too close; tweak 0.5f as you like
+		const bool bSprint = (d < PreferMin * 0.5f);
+
 		P->AddMovementInput(FVector(-FMath::Sign(dx), 0.f, 0.f), 1.f);
+
+		SetState(bSprint ? EAIMovementState::Run : EAIMovementState::Walk);
+		SetSpeedForState(bSprint ? EAIMovementState::Run : EAIMovementState::Walk);
+
 		if (bSnapToGround) Snap(P);
 		return;
 	}
 
-	// --- Inside band: either move to a post-shot strafe goal, or succeed (allow fire) ---
+	// =============== Inside band: post-shot strafe or succeed ===============
 	if (!bRandomizeInBand)
 	{
 		if (auto* M = P->FindComponentByClass<UFloatingPawnMovement>()) M->StopMovementImmediately();
+		SetState(EAIMovementState::Idle);
 		FinishLatentTask(OwnerComp, EBTNodeResult::Succeeded);
 		return;
 	}
@@ -79,7 +115,7 @@ void UBTT_MaintainDistance2D::TickTask(UBehaviorTreeComponent& OwnerComp, uint8*
 		? BB->GetValueAsBool(RequestNewStrafeKey.SelectedKeyName)
 		: false;
 
-	// Only pick a new strafe goal if Fire requested it (after shot), and we don't already have one
+	// Only pick a new strafe spot after a shot (one-time), and only if we don't already have a goal
 	if (bRequestNew && !bHasGoalX)
 	{
 		float NewGoalX = 0.f;
@@ -88,10 +124,10 @@ void UBTT_MaintainDistance2D::TickTask(UBehaviorTreeComponent& OwnerComp, uint8*
 			GoalX = NewGoalX;
 			bHasGoalX = true;
 
-			// consume request so we only randomize once per shot
+			// consume the request so it won't re-randomize until next shot
 			BB->SetValueAsBool(RequestNewStrafeKey.SelectedKeyName, false);
 
-			// optional debug spot
+			// optional: write debug spot to BB
 			if (!StrafeSpotKey.SelectedKeyName.IsNone())
 			{
 				FVector Ground;
@@ -103,32 +139,40 @@ void UBTT_MaintainDistance2D::TickTask(UBehaviorTreeComponent& OwnerComp, uint8*
 		}
 		else
 		{
-			// couldn't find a nice spot; just let Fire proceed
+			// Couldn't find a good strafe → stop & let Fire proceed
 			if (auto* M = P->FindComponentByClass<UFloatingPawnMovement>()) M->StopMovementImmediately();
+			SetState(EAIMovementState::Idle);
 			FinishLatentTask(OwnerComp, EBTNodeResult::Succeeded);
 			return;
 		}
 	}
 
-	// If we have a strafe goal, move toward it; else we’re free to shoot this tick
+	// If we have a strafe goal, slide to it; otherwise succeed so Fire can run now
 	if (bHasGoalX)
 	{
 		const float DirX = FMath::Sign(GoalX - Me.X);
 		Flip(P, DirX);
 		P->AddMovementInput(FVector(DirX, 0.f, 0.f), 1.f);
+
+		// Strafe is a controlled slide → keep it Walk
+		SetState(EAIMovementState::Walk);
+		SetSpeedForState(EAIMovementState::Walk);
+
 		if (bSnapToGround) Snap(P);
 
 		if (FMath::Abs(Me.X - GoalX) <= StrafeEpsilon)
 		{
-			bHasGoalX = false; // clear so we don't keep driving
+			bHasGoalX = false;
 			if (auto* M = P->FindComponentByClass<UFloatingPawnMovement>()) M->StopMovementImmediately();
+			SetState(EAIMovementState::Idle);
 			FinishLatentTask(OwnerComp, EBTNodeResult::Succeeded);
 		}
 		return;
 	}
 
-	// No strafe requested → already in band → succeed so Fire node can run
+	// Already in band & no strafe needed → stop & succeed (let Fire run)
 	if (auto* M = P->FindComponentByClass<UFloatingPawnMovement>()) M->StopMovementImmediately();
+	SetState(EAIMovementState::Idle);
 	FinishLatentTask(OwnerComp, EBTNodeResult::Succeeded);
 }
 
@@ -140,6 +184,9 @@ EBTNodeResult::Type UBTT_MaintainDistance2D::AbortTask(UBehaviorTreeComponent& O
 		{
 			M->StopMovementImmediately();
 		}
+
+		// Aborted => Idle
+		SetAIMoveStateIfEnemy(Pawn.Get(), EAIMovementState::Idle);
 	}
 	return EBTNodeResult::Aborted;
 }

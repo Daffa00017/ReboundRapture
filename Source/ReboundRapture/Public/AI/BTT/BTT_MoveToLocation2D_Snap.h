@@ -3,6 +3,8 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Pawn/Enemy/CPP_EnemyParent.h"      
+#include "Enum/AIMovementState.h"   
 #include "BehaviorTree/BTTaskNode.h"
 #include "BTT_MoveToLocation2D_Snap.generated.h"
 
@@ -43,4 +45,12 @@ private:
 	void SnapDown(APawn* P);
 	void Flip(APawn* P, float DX);
 	
+	static FORCEINLINE void SetStateIfEnemy(APawn* P, EAIMovementState S)
+	{
+		if (ACPP_EnemyParent* E = Cast<ACPP_EnemyParent>(P))
+		{
+			E->SetAIMoveState(S);
+		}
+	}
+
 };
