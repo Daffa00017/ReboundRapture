@@ -4,7 +4,9 @@
 
 #include "CoreMinimal.h"
 #include "CPP_PaperZDParentCharacter.h"
+#include "SharedHeader/RR_MovementTypes.h"   
 #include "Components/CapsuleComponent.h"
+#include "InputTriggers.h"
 #include "InputActionValue.h"
 #include "Delegates/DelegateCombinations.h"
 #include "GameFramework/CharacterMovementComponent.h"
@@ -20,32 +22,6 @@ class UInputAction;
 class UEnhancedInputComponent;
 class UEnhancedInputLocalPlayerSubsystem;
 
-UENUM(BlueprintType) 
-enum class EMovementState : uint8 
-{
-	Idle UMETA(DisplayName = "Idle"),
-	Walk UMETA(DisplayName = "Walk"),
-	Aiming UMETA(DisplayName = "Aiming"),
-	Slide UMETA(DisplayName = "Slide"),
-	Roll UMETA(DisplayName = "Roll"),
-	WallSlide UMETA(DisplayName = "WallSlide"),
-	Dash UMETA(DisplayName = "Dash"),
-	Jump UMETA(DisplayName = "jump")
-};
-
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnMoveAxisUpdated, float, Axis, float, SpeedX);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnMovementStateChanged, EMovementState, OldState, EMovementState, NewState);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnDashStarted, float, Value);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnDashCompleted);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnJumpStarted, float, Value);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnJumpCompleted);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnShootStarted, float, Value);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnShootCompleted);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnSlideRollStarted, float, Value);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnSlideRollCompleted);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnAimStarted, float, Value);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnAimCompleted);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FAimUpdatedSignature, float, AimAngleDegrees, FVector, AimDirection);
 
 /**
  * 
@@ -62,21 +38,6 @@ public:
 	void UpdateRotationBasedOnCursor();
 	virtual void Landed(const FHitResult& Hit) override;
 
-	// --- Action delegate instances ---
-	UPROPERTY(BlueprintAssignable, Category = "Input|Delegates") FOnDashStarted        OnDashStartedEvent;
-	UPROPERTY(BlueprintAssignable, Category = "Input|Delegates") FOnDashCompleted      OnDashCompletedEvent;
-
-	UPROPERTY(BlueprintAssignable, Category = "Input|Delegates") FOnJumpStarted        OnJumpStartedEvent;
-	UPROPERTY(BlueprintAssignable, Category = "Input|Delegates") FOnJumpCompleted      OnJumpCompletedEvent;
-
-	UPROPERTY(BlueprintAssignable, Category = "Input|Delegates") FOnShootStarted       OnShootStartedEvent;
-	UPROPERTY(BlueprintAssignable, Category = "Input|Delegates") FOnShootCompleted     OnShootCompletedEvent;
-
-	UPROPERTY(BlueprintAssignable, Category = "Input|Delegates") FOnSlideRollStarted   OnSlideRollStartedEvent;
-	UPROPERTY(BlueprintAssignable, Category = "Input|Delegates") FOnSlideRollCompleted OnSlideRollCompletedEvent;
-
-	UPROPERTY(BlueprintAssignable, Category = "Input|Delegates") FOnAimStarted         OnAimStartedEvent;
-	UPROPERTY(BlueprintAssignable, Category = "Input|Delegates") FOnAimCompleted       OnAimCompletedEvent;
 
 	UPROPERTY(EditAnywhere,BlueprintReadWrite, category = "Arm")
 	bool UseUpdateArmAim = false;
@@ -217,46 +178,16 @@ protected:
 		meta = (ClampMin = "0", ClampMax = "1000", DisplayPriority = "1"))
 	float CursorRotationThreshold = 100.f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Player Controls", meta = (DisplayPriority = 1))
-	float RotationUpdateInterval = 0.5f;
-
 	UPROPERTY(Transient, BlueprintReadOnly, Category = "Player Controls", meta = (DisplayPriority = 1))
 	APlayerController* CachedPlayerController;
-
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Movement")
-	EMovementState CurrentMovementState = EMovementState::Idle;
-
-	UPROPERTY(BlueprintAssignable, Category = "Anim|Delegates")
-	FOnMovementStateChanged OnMovementStateChanged;
-
-	UFUNCTION(BlueprintCallable, Category = "Movement")
-	void ChangeMovementState(EMovementState NewState);
-
-	UFUNCTION(BlueprintNativeEvent, Category = "Movement")
-	void CustomEventOnLanded(FHitResult HitResult);
-
-	UPROPERTY(EditAnywhere, Category = "Movement|Tuning")
-	float WalkSpeedThreshold = 50.f;
-
-	UPROPERTY(EditAnywhere, Category = "Movement|Tuning")
-	float IdleConfirmDelay = 0.06f;
 
 	UPROPERTY(EditAnywhere, Category = "Movement|Tuning")
 	float WalkCommitDelay = 0.03f;
 
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Movement|State")
-	bool bIsFalling = false;
-
-	bool IsGrounded() const;
+	UFUNCTION(BlueprintNativeEvent, Category = "Movement")
+	void CustomEventOnLanded(FHitResult HitResult);
 
 	bool bIsChangingState = false;
-
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movement|State")
-	int MaxJumpCount = 2;
-
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movement|State", meta = (ClampMin = "0", ClampMax = "5", DisplayPriority = "1"))
-	int CurrentJumpCount;
-
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Movement", meta = (AllowPrivateAccess = "true"))
 	float MoveAxis = 0.f;                
@@ -266,40 +197,6 @@ protected:
 
 	float LastAxisSent = 9999.f;     // sentinel
 	float LastSpeedXSent = -1.f;
-
-	UPROPERTY(EditAnywhere, Category = "Anim|Tuning")
-	float AxisEpsilon = 0.001f;      // exact change for digital axis is fine
-
-	UPROPERTY(EditAnywhere, Category = "Anim|Tuning")
-	float SpeedEpsilon = 2.0f;       // pixels/uu per sec change before we notify
-
-	UPROPERTY(BlueprintAssignable, Category = "Anim|Delegates")
-	FOnMoveAxisUpdated OnMoveAxisUpdatedDelegate;
-
-	//Input Variable
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Input|State")
-	bool bLeftHeld = false;
-
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Input|State")
-	bool bRightHeld = false;
-
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Input|State")
-	bool bWasBothHeld = false;
-
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Input|State")
-	bool bDashInput = false;
-
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Input|State")
-	bool bJumpInput = false;
-
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Input|State")
-	bool bShootInput = false;
-
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Input|State")
-	bool bSlideRollInput = false;
-
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Input|State")
-	bool bAimInput = false;
 
 	bool GetCursorWorldOnCharacterPlane(FVector& OutWorld) const;
 
@@ -314,7 +211,6 @@ protected:
 	
 
 private:
-	float LastRotationUpdateTime = -1.f;
 	FORCEINLINE bool GetCharacterScreenPosition(FVector2D& OutPos) const;
 	UEnhancedInputComponent* CachedEIC = nullptr;
 
@@ -354,7 +250,7 @@ private:
 	UPROPERTY(EditAnywhere, Category = "Input", meta = (DisplayPriority = 0))
 	UInputAction* AimAction = nullptr;
 
-	EMovementState LastMovementState = EMovementState::Idle;
+	EE_PlayerMovementState LastMovementState = EE_PlayerMovementState::Idle;
 
 	// cached XZ unit vector (for muzzle rotation)
 	FVector LastAimDir = FVector::ForwardVector;
@@ -363,7 +259,6 @@ private:
 	//Input Function
 
 	//MoveAction (A & D) Input
-	void MoveHorizontal(const FInputActionValue& Value);
 	void OnMoveLeftTriggered(const FInputActionValue& Value);
 	void OnMoveRightTriggered(const FInputActionValue& Value);
 	void OnMoveLeftStarted(const FInputActionValue& Value);
@@ -372,10 +267,6 @@ private:
 	void OnMoveRightCompleted(const FInputActionValue& Value);
 		//MoveAction Function To move the player
 		void RecomputeAxisAndSpeed();
-		void UpdateMovementStateFromAxis();
-		void ScheduleIdleConfirm();
-		void ConfirmIdle();
-		void CommitWalkIfStillDirected();
 
 	// Dash
 	void OnDashStarted(const FInputActionValue& Value);
@@ -402,7 +293,7 @@ private:
 	void OnAimTriggered(const FInputActionValue& Value);
 	void OnAimCompleted(const FInputActionValue& Value);
 
-	
+	void HandleMove(bool bIsLeftKey, ETriggerEvent Phase, const FInputActionValue& Value);
 
 	FORCEINLINE int GetCombinedAxis() const
 	{
@@ -411,18 +302,11 @@ private:
 		return R - L;   // -1 if Left, +1 if Right, 0 if none or both
 	}
 
-	static float GetScalar01(const FInputActionValue& V)
+	static FORCEINLINE bool RR_IsAirState(EE_PlayerMovementState S)
 	{
-		// Bool ? 0/1, 1D Axis ? normalized, others ? magnitude
-		if (V.GetValueType() == EInputActionValueType::Boolean)
-			return V.Get<bool>() ? 1.f : 0.f;
-		if (V.GetValueType() == EInputActionValueType::Axis1D)
-			return V.Get<float>();
-		if (V.GetValueType() == EInputActionValueType::Axis2D)
-			return V.Get<FVector2D>().Size();
-		if (V.GetValueType() == EInputActionValueType::Axis3D)
-			return V.Get<FVector>().Size();
-		return 0.f;
+		return S == EE_PlayerMovementState::Jump
+			|| S == EE_PlayerMovementState::WallSlide
+			|| S == EE_PlayerMovementState::Dash; // add other air states if needed
 	}
 
 };

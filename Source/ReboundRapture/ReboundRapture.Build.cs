@@ -15,7 +15,8 @@ public class ReboundRapture : ModuleRules
 															"EnhancedInput",
 															"UMG", 
 															"Slate",
-															"SlateCore"});
+															"SlateCore",
+															"PaperZD"});
 
 		PrivateDependencyModuleNames.AddRange(new string[] {  });
 
