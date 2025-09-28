@@ -25,6 +25,9 @@ public:
 	float AutoScrollSpeed = 320.f; // uu/sec; down is negative Z
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Variable | CameraManager | DownWell")
+	float WellCenterX = 0.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Variable | CameraManager | DownWell")
 	bool bLockYToZero = true;
 
 protected:
@@ -36,21 +39,19 @@ protected:
 		{
 			const FVector T = FollowTarget->GetActorLocation();
 
-			// Horizontal soft zone
-			const float dx = T.X - Desired.X;
-			if (FMath::Abs(dx) > SoftZoneHalfWidth)
-			{
-				Desired.X += (dx - FMath::Sign(dx) * SoftZoneHalfWidth);
-			}
+			// Lock horizontal axis (well center)
+			Desired.X = WellCenterX;   // usually 0.0f, or whatever your well center is
 
 			// Lead below target
 			Desired.Z = T.Z - DownLead;
 		}
 
-		// Auto-scroll downward
+		// Auto-scroll downward (keeps moving even if player stalls)
 		Desired.Z -= AutoScrollSpeed * DeltaSeconds;
 
+		// Always keep camera centered on well in Y
 		if (bLockYToZero) Desired.Y = 0.f;
+
 		return Desired;
 	}
 };

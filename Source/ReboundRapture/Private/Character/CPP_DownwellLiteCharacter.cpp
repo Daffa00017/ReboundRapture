@@ -44,12 +44,19 @@ void ACPP_DownwellLiteCharacter::JumpFunction()
         else
         {
             StopJumping();
+            if (IsDebugMode){
+
+            }
+            else{
             CurrentAmmoCount--;
+            }
             GetCharacterMovement()->JumpZVelocity = JumpHeightMidAir;
         }
         Jump();
         ChangeMovementState(EE_PlayerMovementState::Jump);
         UE_LOG(LogTemp, Warning, TEXT("CurrentAmmoCount: %d"), CurrentAmmoCount);
+    
+
     }
 }
 

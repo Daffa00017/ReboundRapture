@@ -54,6 +54,9 @@ public:
 	UPROPERTY(BlueprintReadWrite, category = "Variable | Movement | SmashDown")
 	bool IsUpdatingGravity = false;
 
+	UPROPERTY(BlueprintReadWrite, category = "Variable | Movement | SmashDown")
+	bool IsDebugMode = false;
+
 protected :
 
 	virtual void Tick(float DeltaSeconds) override;
