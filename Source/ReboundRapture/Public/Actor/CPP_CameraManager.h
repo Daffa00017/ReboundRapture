@@ -59,6 +59,20 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Rig")
 	void AdoptAsViewTarget(float BlendTime = 0.25f);
 
+	// --- Focus (minimal, generic) ---
+	UFUNCTION(BlueprintCallable, Category = "Camera|Focus")
+	void FocusOnActor(AActor* Target, float LerpSpeed = 7.f, bool bCenterX = true, float ZOffset = 0.f, float KeepSeconds = 0.f);
+
+	UFUNCTION(BlueprintCallable, Category = "Camera|Focus")
+	void FocusOnPlayer(float LerpSpeed = 7.f, bool bCenterX = true, float ZOffset = 0.f, float KeepSeconds = 0.f);
+
+	UFUNCTION(BlueprintCallable, Category = "Camera|Focus")
+	void CancelFocus();
+
+	// Quick check
+	UFUNCTION(BlueprintPure, Category = "Camera|Focus")
+	bool IsFocusing() const { return bFocusActive && FocusTarget.IsValid(); }
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void Tick(float DeltaSeconds) override;
@@ -69,4 +83,13 @@ protected:
 private:
 	// Removed: Sphere, LineTraceForObstruction, FollowPlayer, UpdateCameraPosition, CanLookAround, IsFollow
 	// Keep SpringArm camera lag if you like it (configure in BeginPlay or per child)
+
+	// --- minimal focus state ---
+	UPROPERTY() TWeakObjectPtr<AActor> FocusTarget;
+	bool  bFocusActive = false;
+	float FocusLerp = 7.f;
+	bool  bFocusCenterX = true;
+	float FocusZOffset = 0.f;
+	float FocusKeepSeconds = 0.f; // 0 = until CancelFocus
+	float FocusTimeLeft = 0.f;
 };

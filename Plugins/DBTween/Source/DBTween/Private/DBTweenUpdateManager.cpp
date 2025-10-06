@@ -62,6 +62,9 @@ void ADBTweenUpdateManager::BeginPlay()
 void ADBTweenUpdateManager::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	Instance = nullptr;
+
+	// Important: call parent to let UE clean up correctly
+	Super::EndPlay(EndPlayReason);
 }
 
 // Called every frame

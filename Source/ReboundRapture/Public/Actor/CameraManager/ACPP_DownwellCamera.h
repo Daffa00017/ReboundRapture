@@ -14,7 +14,12 @@ class REBOUNDRAPTURE_API AACPP_DownwellCamera : public ACPP_CameraManager
 {
 	GENERATED_BODY()
 	
+
 public:
+	AACPP_DownwellCamera();
+
+	virtual void BeginPlay() override;
+	virtual FVector ComputeDesiredLocation(float DeltaSeconds) const override;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Variable | CameraManager | DownWell")
 	float SoftZoneHalfWidth = 220.f;
 
@@ -27,31 +32,16 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Variable | CameraManager | DownWell")
 	float WellCenterX = 0.f;
 
+    UPROPERTY(EditAnywhere, Category = "Downwell|Follow", meta = (ClampMin = "0", ClampMax = "1"))
+    float FollowDownLerp = 1.f;       // 1 = snap to desired down, <1 smooth
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Variable | CameraManager | DownWell")
 	bool bLockYToZero = true;
 
+
+
 protected:
-	virtual FVector ComputeDesiredLocation(float DeltaSeconds) const override
-	{
-		FVector Desired = GetActorLocation();
 
-		if (FollowTarget)
-		{
-			const FVector T = FollowTarget->GetActorLocation();
-
-			// Lock horizontal axis (well center)
-			Desired.X = WellCenterX;   // usually 0.0f, or whatever your well center is
-
-			// Lead below target
-			Desired.Z = T.Z - DownLead;
-		}
-
-		// Auto-scroll downward (keeps moving even if player stalls)
-		Desired.Z -= AutoScrollSpeed * DeltaSeconds;
-
-		// Always keep camera centered on well in Y
-		if (bLockYToZero) Desired.Y = 0.f;
-
-		return Desired;
-	}
+	mutable float LastCameraZ = 0.f;
+    
 };

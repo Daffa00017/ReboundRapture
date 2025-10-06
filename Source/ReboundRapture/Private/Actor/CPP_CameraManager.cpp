@@ -1,4 +1,4 @@
-// CPP_CameraManager.cpp  (BASE)
+// CPP_CameraManager.cpp  (Base)
 #include "Actor/CPP_CameraManager.h"
 #include "Kismet/GameplayStatics.h"
 #include "GameFramework/PlayerController.h"
@@ -54,15 +54,40 @@ void ACPP_CameraManager::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
 
-	const FVector Desired = ComputeDesiredLocation(DeltaSeconds);
+	// Auto-expire timed focus
+	if (bFocusActive && FocusKeepSeconds > 0.f)
+	{
+		FocusTimeLeft -= DeltaSeconds;
+		if (FocusTimeLeft <= 0.f)
+		{
+			CancelFocus();
+		}
+	}
+
+	FVector Desired;
+
+	if (IsFocusing())
+	{
+		const FVector Curr = GetActorLocation();
+		FVector Goal = FocusTarget->GetActorLocation();
+		if (!bFocusCenterX) Goal.X = Curr.X;     // keep current X if you don’t want horizontal centering
+		Goal.Z += FocusZOffset;
+
+		// Lerp with dedicated focus speed (keeps your normal FollowLerpSpeed for non-focus)
+		Desired = FMath::VInterpTo(Curr, Goal, DeltaSeconds, FocusLerp);
+	}
+	else
+	{
+		Desired = ComputeDesiredLocation(DeltaSeconds); // your child logic (downwell/sidescroll)
+	}
+
 	const FVector NewLoc = FMath::VInterpTo(GetActorLocation(), Desired, DeltaSeconds, FollowLerpSpeed);
 	SetActorLocation(NewLoc);
 
-	// Keep knobs hot if you tweak at runtime
+	// (keep your hot knobs code)
 	SpringArm->TargetArmLength = ArmLength;
 	SpringArm->SetRelativeRotation(ArmRotation);
-	Camera->ProjectionMode = bUseOrthographic ? ECameraProjectionMode::Orthographic
-		: ECameraProjectionMode::Perspective;
+	Camera->ProjectionMode = bUseOrthographic ? ECameraProjectionMode::Orthographic : ECameraProjectionMode::Perspective;
 	if (bUseOrthographic) { Camera->OrthoWidth = OrthoWidth; }
 }
 
@@ -77,4 +102,40 @@ void ACPP_CameraManager::AdoptAsViewTarget(float BlendTime)
 	{
 		PC->SetViewTargetWithBlend(this, BlendTime);
 	}
+}
+
+void ACPP_CameraManager::FocusOnActor(AActor* Target, float LerpSpeed, bool bCenterX, float ZOffset, float KeepSeconds)
+{
+	if (!IsValid(Target))
+	{
+		CancelFocus();
+		return;
+	}
+	FocusTarget = Target;
+	bFocusActive = true;
+	FocusLerp = FMath::Max(0.f, LerpSpeed);
+	bFocusCenterX = bCenterX;
+	FocusZOffset = ZOffset;
+	FocusKeepSeconds = FMath::Max(0.f, KeepSeconds);
+	FocusTimeLeft = FocusKeepSeconds;
+}
+
+void ACPP_CameraManager::FocusOnPlayer(float LerpSpeed, bool bCenterX, float ZOffset, float KeepSeconds)
+{
+	if (APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), 0))
+	{
+		if (APawn* P = PC->GetPawn())
+		{
+			FocusOnActor(P, LerpSpeed, bCenterX, ZOffset, KeepSeconds);
+			return;
+		}
+	}
+	CancelFocus();
+}
+
+void ACPP_CameraManager::CancelFocus()
+{
+	bFocusActive = false;
+	FocusTarget = nullptr;
+	FocusTimeLeft = 0.f;
 }

@@ -288,6 +288,70 @@ void APlatformStrip::BuildTiledByCount_Safe(int32 TileCount)
     BuildTiledByCount(TileCount);
 }
 
+void APlatformStrip::BuildTiledByCount_Flex(int32 Count)
+{
+    // Pick baseline to get sizes/PPUU (prefer hazard-aware middle)
+    UPaperSprite* Baseline = PickMiddle();
+    if (!Baseline) Baseline = Middle ? Middle : (OuterLeft ? OuterLeft : OuterRight);
+    if (!Baseline) return;
+
+    const FVector2f T = GetTileSizeUU(Baseline);
+    const float tileW = T.X;
+    const float tileH = T.Y;
+
+    const int32 N = FMath::Clamp(Count, 2, 128);
+
+    ClearBuiltTiles();
+
+    // Compute span we intend to draw (for collider sizing)
+    float usedW = 0.f;
+
+    if (N == 2)
+    {
+        usedW = 2.f * tileW;
+        const float leftX = -0.5f * usedW + 0.5f * tileW;
+        AddTile(OuterLeft, leftX + 0.f * tileW, 0.f);
+        AddTile(OuterRight, leftX + 1.f * tileW, 0.f);
+    }
+    else if (N == 3)
+    {
+        usedW = 3.f * tileW;
+        const float leftX = -0.5f * usedW + 0.5f * tileW;
+        AddTile(OuterLeft, leftX + 0.f * tileW, 0.f);
+        AddTile(Middle ? Middle : Baseline, leftX + 1.f * tileW, 0.f);
+        AddTile(OuterRight, leftX + 2.f * tileW, 0.f);
+    }
+    else if (N == 4)
+    {
+        usedW = 4.f * tileW;
+        const float leftX = -0.5f * usedW + 0.5f * tileW;
+        AddTile(OuterLeft, leftX + 0.f * tileW, 0.f);
+        AddTile(MiddleLeft ? MiddleLeft : (Middle ? Middle : Baseline), leftX + 1.f * tileW, 0.f);
+        AddTile(MiddleRight ? MiddleRight : (Middle ? Middle : Baseline), leftX + 2.f * tileW, 0.f);
+        AddTile(OuterRight, leftX + 3.f * tileW, 0.f);
+    }
+    else
+    {
+        usedW = float(N) * tileW;
+        const float leftX = -0.5f * usedW + 0.5f * tileW;
+
+        int32 i = 0;
+        AddTile(OuterLeft, leftX + (i++) * tileW, 0.f);
+        AddTile(MiddleLeft ? MiddleLeft : (Middle ? Middle : Baseline), leftX + (i++) * tileW, 0.f);
+
+        const int32 innerCount = N - 4;
+        UPaperSprite* MidFill = PickMiddle();
+        for (int32 k = 0; k < innerCount; ++k, ++i)
+            AddTile(MidFill ? MidFill : (Middle ? Middle : Baseline), leftX + i * tileW, 0.f);
+
+        AddTile(MiddleRight ? MiddleRight : (Middle ? Middle : Baseline), leftX + (i++) * tileW, 0.f);
+        AddTile(OuterRight, leftX + (i)*tileW, 0.f);
+    }
+
+    // Size collider to match span (pads/top-anchor handled inside helper)
+    ApplyCollisionSizing(usedW, tileH);
+}
+
 void APlatformStrip::SetCollisionPads(float InPadX, float InPadY, float InTopBoostY)
 {
     CollisionPadXUU = InPadX;

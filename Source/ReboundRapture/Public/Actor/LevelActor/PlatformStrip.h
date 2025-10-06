@@ -31,9 +31,10 @@ public:
 	// Sets default values for this actor's properties
 	APlatformStrip();
 
-    UFUNCTION(BlueprintCallable) void BuildTiled(float TargetWidthUU);
-    UFUNCTION(BlueprintCallable) void BuildTiledByCount(int32 TileCount);
-    UFUNCTION(BlueprintCallable) void BuildTiledByCount_Safe(int32 TileCount);
+    UFUNCTION(BlueprintCallable, Category = "Platform|Build") void BuildTiled(float TargetWidthUU);
+    UFUNCTION(BlueprintCallable, Category = "Platform|Build") void BuildTiledByCount(int32 TileCount);
+    UFUNCTION(BlueprintCallable, Category = "Platform|Build") void BuildTiledByCount_Safe(int32 TileCount);
+    UFUNCTION(BlueprintCallable, Category = "Platform|Build") void BuildTiledByCount_Flex(int32 Count);
     UFUNCTION(BlueprintCallable, Category = "Platform") void SetVisualKind(EPlatformKind InKind);
     UFUNCTION(BlueprintCallable, Category = "Platform|Render") void SetSpriteRollDegrees(float InRoll);
     UFUNCTION(BlueprintCallable, Category = "Collision|Debug") void SetCollisionVisible(bool bVisible);

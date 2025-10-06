@@ -54,7 +54,7 @@ void ACPP_DownwellLiteCharacter::JumpFunction()
         }
         Jump();
         ChangeMovementState(EE_PlayerMovementState::Jump);
-        UE_LOG(LogTemp, Warning, TEXT("CurrentAmmoCount: %d"), CurrentAmmoCount);
+        //UE_LOG(LogTemp, Warning, TEXT("CurrentAmmoCount: %d"), CurrentAmmoCount);
     
 
     }
@@ -62,38 +62,46 @@ void ACPP_DownwellLiteCharacter::JumpFunction()
 
 void ACPP_DownwellLiteCharacter::SetMoveAxis(float InAxis)
 {
-    MoveAxis = FMath::Clamp(InAxis, -1.f, 1.f);
-
-    // movement every frame because Triggered calls this continuously
-    if (!FMath::IsNearlyZero(MoveAxis))
-    {
-        AddMovementInput(FVector(1.f, 0.f, 0.f), MoveAxis);
-    }
-
-    const bool bAxisZero = FMath::IsNearlyZero(MoveAxis);
-    const bool bWasZero = FMath::IsNearlyZero(PrevAxisForIdle);
-
-    if (IsGrounded())
-    {
-        if (!bAxisZero)
+    if (IsDead) 
         {
-            ClearIdleConfirmTimer();
-            if (CurrentMovementState != EE_PlayerMovementState::Walk)
-                ChangeMovementState(EE_PlayerMovementState::Walk);
+
         }
-        else if (!bWasZero) // only when transitioning to zero
-        {
-            ScheduleIdleConfirm();
-        }
-    }
     else
-    {
-        ClearIdleConfirmTimer();
-        if (bJumpInput && bIsFalling && CurrentMovementState != EE_PlayerMovementState::Jump)
-            ChangeMovementState(EE_PlayerMovementState::Jump);
-    }
+        {
+            MoveAxis = FMath::Clamp(InAxis, -1.f, 1.f);
 
-    PrevAxisForIdle = MoveAxis;
+            // movement every frame because Triggered calls this continuously
+            if (!FMath::IsNearlyZero(MoveAxis))
+                {
+                    AddMovementInput(FVector(1.f, 0.f, 0.f), MoveAxis);
+                }
+
+                const bool bAxisZero = FMath::IsNearlyZero(MoveAxis);
+                const bool bWasZero = FMath::IsNearlyZero(PrevAxisForIdle);
+
+                if (IsGrounded())
+                    {
+                        if (!bAxisZero)
+                            {
+                                ClearIdleConfirmTimer();
+                                if (CurrentMovementState != EE_PlayerMovementState::Walk)
+                                ChangeMovementState(EE_PlayerMovementState::Walk);
+                            }
+                        else if (!bWasZero) // only when transitioning to zero
+                            {
+                                ScheduleIdleConfirm();
+                            }
+                    }
+                else
+                    {
+                        ClearIdleConfirmTimer();
+                        if (bJumpInput && bIsFalling && CurrentMovementState != EE_PlayerMovementState::Jump)
+                        ChangeMovementState(EE_PlayerMovementState::Jump);
+                    }
+
+            PrevAxisForIdle = MoveAxis;
+
+        }
 }
 
 void ACPP_DownwellLiteCharacter::InputJumpPressed()
@@ -147,7 +155,7 @@ void ACPP_DownwellLiteCharacter::InputDownPressed()
     if (!IsGrounded())
     {
         OnDownSmashStartedEvent.Broadcast(GetScalar01(1));
-        UE_LOG(LogTemp, Warning, TEXT("Smash Ground"));
+        //UE_LOG(LogTemp, Warning, TEXT("Smash Ground"));
         IsSmashingDown = true;
     }
 }

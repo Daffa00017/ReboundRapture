@@ -23,6 +23,10 @@ public:
 	virtual void OnConstruction(const FTransform& Transform) override;
 	virtual void Tick(float DeltaSeconds) override;
 
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Platforms")
+	bool bSpawnPlatforms = false;
+
 protected:
 	// Called when the game starts or when spawned
 	virtual void BeginPlay() override;
@@ -39,6 +43,13 @@ protected:
 	UBoxComponent* RightSeam;
 
 	// ------------------- Tunables -------------------
+
+	// === Runtime control (call these from your death/respawn flow) ===
+	UFUNCTION(BlueprintCallable, Category = "Runtime")
+	void PauseAndFlush(bool bAlsoWalls = true, bool bDisableWallBlockers = true);
+
+	UFUNCTION(BlueprintCallable, Category = "Runtime")
+	void ResumeSpawning(float StartDelaySeconds = 0.75f, float StartBelowPlayerScreens = 1.0f);
 
 	/** Number of logic lanes across the screen (5 recommended). */
 	UPROPERTY(EditAnywhere, Category = "Playfield")
@@ -109,6 +120,7 @@ protected:
 	UPROPERTY(EditAnywhere, Category = "Debug")
 	bool bDrawLaneGuides = true;
 
+	//--Platform--
 	// ---- Rows / segments ----
 	UPROPERTY(EditAnywhere, Category = "Rows")
 	float RowHeightUU = 176.f;                  // ~11 tiles if 16 UU per tile
@@ -120,62 +132,62 @@ protected:
 	float CullBufferScreens = 2.5f;             // how far above to keep
 
 	// ---- Scaffold turn chance (ramps later) ----
-	UPROPERTY(EditAnywhere, Category = "Scaffold")
+	UPROPERTY(EditAnywhere, Category = "Platforms")
 	float TurnChanceStart = 0.25f;              // 25% at start
-	UPROPERTY(EditAnywhere, Category = "Scaffold")
+	UPROPERTY(EditAnywhere, Category = "Platforms")
 	float TurnChanceMax = 0.40f;              // 40% deep
-	UPROPERTY(EditAnywhere, Category = "Scaffold")
+	UPROPERTY(EditAnywhere, Category = "Platforms")
 	float DepthAtMaxScreens = 30.f;             // depth where it hits max
 
 	// How thick (along +Y) each platform's collision should be. If <= 0, the strip auto-computes.
-	UPROPERTY(EditAnywhere, Category = "Scaffold|Tuning")
+	UPROPERTY(EditAnywhere, Category = "Platforms|Tuning")
 	float PlatformCollisionHeightUU = 96.f;
 
 	// Roll (degrees) applied to each spawned platform's sprites (0 = default; try 90 or -90 if needed)
-	UPROPERTY(EditAnywhere, Category = "Scaffold|Tuning")
+	UPROPERTY(EditAnywhere, Category = "Platforms|Tuning")
 	float PlatformSpriteRollDeg = 0.f;
 
 	// Pads applied to every spawned platform (can still be overridden per BP child)
-	UPROPERTY(EditAnywhere, Category = "Scaffold|Collision")
+	UPROPERTY(EditAnywhere, Category = "Platforms|Collision")
 	float PlatformCollisionPadXUU = 0.f;         // extend left/right equally
 
-	UPROPERTY(EditAnywhere, Category = "Scaffold|Collision")
+	UPROPERTY(EditAnywhere, Category = "Platforms|Collision")
 	float PlatformCollisionPadYUU = 0.f;         // extend forward/back equally
 
-	UPROPERTY(EditAnywhere, Category = "Scaffold|Collision")
+	UPROPERTY(EditAnywhere, Category = "Platforms|Collision")
 	float PlatformCollisionTopBoostUU = 0.f;
 
-	UPROPERTY(EditAnywhere, Category = "Scaffold|Collision")
+	UPROPERTY(EditAnywhere, Category = "Platforms|Collision")
 	float PlatformWallClearanceUU = 4.f;
 
-	UPROPERTY(EditAnywhere, Category = "Spawn")
+	UPROPERTY(EditAnywhere, Category = "Platforms")
 	int32 TilesPerLane = 2; // 1 or 2 recommended
 
-	UPROPERTY(EditAnywhere, Category = "Spawn")
+	UPROPERTY(EditAnywhere, Category = "Platforms")
 	int32 ScaffoldTilesPerRun = 2; // how many tiles wide a scaffold platform is
 
 	// Prefab for scaffold floors
-	UPROPERTY(EditAnywhere, Category = "Spawn")
+	UPROPERTY(EditAnywhere, Category = "Platforms")
 	TSubclassOf<class APlatformStrip> ScaffoldPlatformClass;
 
 	// Platform sizing (UU)
-	UPROPERTY(EditAnywhere, Category = "Spawn")
+	UPROPERTY(EditAnywhere, Category = "Platforms")
 	float ScaffoldWidthMul = 0.9f;   // 90% of lane width so it looks inset
-	UPROPERTY(EditAnywhere, Category = "Spawn")
+	UPROPERTY(EditAnywhere, Category = "Platforms")
 	float ScaffoldHeightUU = 24.f;   // thin slab; tweak to feel
 
 	// Depth (Z) placement for spawned platforms
-	UPROPERTY(EditAnywhere, Category = "Spawn|Depth")
+	UPROPERTY(EditAnywhere, Category = "Platforms|Depth")
 	bool bLockPlatformsToPlayerZ = true;
 
-	UPROPERTY(EditAnywhere, Category = "Spawn|Depth", meta = (EditCondition = "!bLockPlatformsToPlayerZ"))
+	UPROPERTY(EditAnywhere, Category = "Platforms|Depth", meta = (EditCondition = "!bLockPlatformsToPlayerZ"))
 	float PlatformsZ = 0.f; // use this when not locking to player
 
 	// ---- Depth (Y) placement ----
-	UPROPERTY(EditAnywhere, Category = "Spawn|Depth")
+	UPROPERTY(EditAnywhere, Category = "Platforms|Depth")
 	bool bLockPlatformsToPlayerY = true;
 
-	UPROPERTY(EditAnywhere, Category = "Spawn|Depth", meta = (EditCondition = "!bLockPlatformsToPlayerY"))
+	UPROPERTY(EditAnywhere, Category = "Platforms|Depth", meta = (EditCondition = "!bLockPlatformsToPlayerY"))
 	float PlatformsY = 0.f; // used if not locking to player
 
 	// ---- Platform pass (extra platforms) ----
@@ -203,6 +215,24 @@ protected:
 	// Reroll attempts if a row fails validation
 	UPROPERTY(EditAnywhere, Category = "Platforms")
 	int32 RowRerollAttempts = 3;
+
+	// Random tile length per platform strip (visual width in tiles)
+	UPROPERTY(EditAnywhere, Category = "Platforms|Spawn")
+	int32 MinTilesPerStrip = 2;
+
+	UPROPERTY(EditAnywhere, Category = "Platforms|Spawn")
+	int32 MaxTilesPerStrip = 7;
+
+	UPROPERTY(EditAnywhere, Category = "Platforms|Spawn")
+	float PlatformSpawnDelay = 1.2f;
+	float PlatformSpawnStartTime = 0.f;
+
+	UPROPERTY(VisibleAnywhere, Category = "Platforms|Spawn")
+	bool bFirstPlatformSpawn = true;
+
+	// Platform spawn offset (Y-axis) for smooth transition from the main menu
+	UPROPERTY(EditAnywhere, Category = "Platforms|Spawn")
+	float PlatformSpawnOffsetY = 1000.f;
 
 	// ---- Hazards (ramps by depth) ----
 	UPROPERTY(EditAnywhere, Category = "Hazards")
@@ -315,10 +345,12 @@ private:
 	void InitWallsInfinite();
 	void UpdateWallsInfinite();
 	FVector RowCenterWorld(int32 Lane, float LocalY) const;
+	void DestroyAllRows();
+	void DestroyAllWalls(bool bDisableBlockers);
 
 
 	// Build a mask for one row given scaffold lane; bits 0..NumLanes-1 (supports >8 lanes)
-	uint16 BuildRowMask_WithExtras(int32 ScaffoldLaneIdx) const;
+	uint16 BuildRowMask_WithExtras(int32 ScaffoldLaneIdx, uint16 PrevMask) const;
 
 	// Validate mask given previous row's reachable lanes (simple check)
 	bool ValidateRowMask(uint16 PrevMask, uint16 ThisMask) const;

@@ -52,6 +52,9 @@ public:
 	bool IsSmashingDown = false;
 
 	UPROPERTY(BlueprintReadWrite, category = "Variable | Movement | SmashDown")
+	bool IsDead = false;
+
+	UPROPERTY(BlueprintReadWrite, category = "Variable | Movement | SmashDown")
 	bool IsUpdatingGravity = false;
 
 	UPROPERTY(BlueprintReadWrite, category = "Variable | Movement | SmashDown")

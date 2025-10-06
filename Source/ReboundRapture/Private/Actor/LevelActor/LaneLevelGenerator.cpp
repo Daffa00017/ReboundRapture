@@ -101,8 +101,33 @@ void ALaneLevelGenerator::Tick(float DeltaSeconds)
 	if (bSeamsFollowPlayerY) { UpdateSeamPosY(); }
 	if (bDrawDebugSeams) { DrawSeamDebug(); }
 
-	EnsureSegmentsAhead();   // NEW
-	CullOldRows();           // NEW
+
+	if (bSpawnPlatforms)
+	{
+		if (PlatformSpawnStartTime == 0.f)  // Only set this once when spawn starts
+		{
+			PlatformSpawnStartTime = GetWorld()->GetTimeSeconds();
+		}
+
+		// Check if the delay has passed
+		if (GetWorld()->GetTimeSeconds() - PlatformSpawnStartTime >= PlatformSpawnDelay)
+		{
+			if (bFirstPlatformSpawn)
+			{
+				// Spawn first platform below the player
+				if (PlayerRef)
+				{
+					// Adjust spawn position to be below the player
+					CursorLocalY = PlayerLocalY() + PlatformSpawnOffsetY;
+					bFirstPlatformSpawn = false; // Stop doing this after the first platform
+				}
+			}
+
+			EnsureSegmentsAhead();   // Spawn platforms after the delay
+			CullOldRows();           // Clean up old platforms
+		}
+	}
+
 	if (bDrawScaffoldDebug) { DrawScaffoldDebug(); } // NEW
 	if (bShowWalls) UpdateWallsInfinite();
 }
@@ -288,54 +313,63 @@ void ALaneLevelGenerator::GenerateScaffoldSegment()
 		ScaffoldLane = (ScaffoldLane + dir + NumLanes) % NumLanes;
 	}
 
-	// Build a row mask: scaffold + extras (supports >8 lanes via uint16)
-	const uint16 Mask0 = BuildRowMask_WithExtras(ScaffoldLane);
+	// Previous row mask (for reachability + anti-stacking + "no back-to-back empty")
+	const uint16 PrevMask = (LiveRows.Num() > 0) ? LiveRows.Last().ScaffoldBits : 0;
 
-	// Validate against previous row for reachability; reroll a few times if needed
-	uint16 PrevMask = 0;
-	if (LiveRows.Num() > 0) PrevMask = LiveRows.Last().ScaffoldBits;
+	// --- Row skipping (creates vertical gaps) ---
+	// Reuse the platforms density ramp: when extras are rare, allow more empty rows.
+	// We also avoid two empty rows in a row (PrevMask==0 guard).
+	const float pExtra = ExtraPlatformChance();                 // 0..1 from your existing ramp
+	const float rowSkipChance = FMath::Clamp(0.35f - 0.5f * pExtra, 0.f, 0.35f);
+	const bool  bCanSkip = (PrevMask != 0);                     // don't create two blanks in a row
+	const bool  bSkipThisRow = bCanSkip && (FMath::FRand() < rowSkipChance);
 
-	uint16 FinalMask = Mask0;
-	int Reroll = 0;
-	while (!ValidateRowMask(PrevMask, FinalMask) && Reroll < RowRerollAttempts)
-	{
-		FinalMask = BuildRowMask_WithExtras(ScaffoldLane);
-		++Reroll;
-	}
-
-	// Record this row (even in dry-run; CursorLocalY still advances)
+	// Row record (we always advance CursorLocalY)
 	FRowBit Row;
-	Row.ScaffoldBits = FinalMask;
 	Row.RowIndex = NextRowIndex++;
 	Row.LocalY = CursorLocalY;
 
-	// Isolation modes:
-	// - If SkipRuns: keep the legacy single-lane scaffold for testing
-	// - Else: build runs (and hazards if enabled), then spawn
-	if (!bGen_SkipRuns && !bGen_DryRun_NoSpawn)
-	{
-		// Runs
-		TArray<FRowRun> Runs;
-		BuildRunsFromMask(FinalMask, ScaffoldLane, Runs);
+	uint16 FinalMask = 0;
 
-		// Hazards (behind a flag so you can test “runs-only” first)
-		if (!bGen_SkipHazards)
+	if (!bSkipThisRow)
+	{
+		// Build: scaffold + extras, with anti-stack bias vs previous row
+		const uint16 Mask0 = BuildRowMask_WithExtras(ScaffoldLane, PrevMask);
+
+		// Validate against previous row for reachability; reroll a few times if needed
+		FinalMask = Mask0;
+		int Reroll = 0;
+		while (!ValidateRowMask(PrevMask, FinalMask) && Reroll < RowRerollAttempts)
 		{
-			ApplyHazardsToRuns(PrevMask, FinalMask, Runs);
+			FinalMask = BuildRowMask_WithExtras(ScaffoldLane, PrevMask);
+			++Reroll;
 		}
 
-		// Spawn rows of platforms at this LocalY
-		SpawnRuns(Runs, Row.LocalY, Row.Actors);
-	}
-	else if (!bGen_DryRun_NoSpawn && bGen_SkipRuns)
-	{
-		// Keep your old isolation path (one guaranteed safe lane)
-		GenerateScaffoldSegment_Simple();
-		return;
+		if (!bGen_SkipRuns && !bGen_DryRun_NoSpawn)
+		{
+			// Runs
+			TArray<FRowRun> Runs;
+			BuildRunsFromMask(FinalMask, ScaffoldLane, Runs);
+
+			// Hazards behind a flag
+			if (!bGen_SkipHazards)
+			{
+				ApplyHazardsToRuns(PrevMask, FinalMask, Runs);
+			}
+
+			// Spawn rows of platforms at this LocalY
+			SpawnRuns(Runs, Row.LocalY, Row.Actors);
+		}
+		else if (!bGen_DryRun_NoSpawn && bGen_SkipRuns)
+		{
+			GenerateScaffoldSegment_Simple();
+			return;
+		}
 	}
 
-	// Bookkeeping: keep the row and advance the cursor downward by one row height
-	LiveRows.Add(Row); // NOTE: if your member is named LiveRows (usual), use that. If you see a typo here, correct to LiveRows.
+	// Bookkeeping + advance
+	Row.ScaffoldBits = FinalMask;   // 0 if the row was skipped
+	LiveRows.Add(Row);
 	CursorLocalY += RowHeightUU;
 }
 
@@ -595,19 +629,39 @@ FVector ALaneLevelGenerator::RowCenterWorld(int32 Lane, float LocalY) const
 	return GetActorTransform().TransformPosition(Local);
 }
 
-uint16 ALaneLevelGenerator::BuildRowMask_WithExtras(int32 ScaffoldLaneIdx) const
+uint16 ALaneLevelGenerator::BuildRowMask_WithExtras(int32 ScaffoldLaneIdx, uint16 PrevMask) const
 {
 	const int32 lanes = FMath::Max(NumLanes, 1);
 	const uint16 one = 1;
-	uint16 mask = (one << (ScaffoldLaneIdx % lanes));  // safe even if lanes > 8
+
+	// Always include scaffold lane
+	uint16 mask = (one << (ScaffoldLaneIdx % lanes));
+
+	// Base probability for extras from your existing ramp
+	const float pBase = ExtraPlatformChance();
+
+	// Simple anti-stack: if previous row had a platform in this lane, reduce chance this row
+	auto LaneHadPrev = [&](int i)
+		{
+			const int idx = (i + lanes) % lanes;
+			return (PrevMask & (uint16(1) << idx)) != 0;
+		};
 
 	int32 extras = 0;
-	const float p = ExtraPlatformChance();
 	for (int i = 0; i < lanes && extras < MaxExtrasPerRow; ++i)
 	{
 		if (i == ScaffoldLaneIdx) continue;
-		if (FMath::FRand() < p) { mask |= (one << i); ++extras; }
+
+		// Bias away from stacking: reduce probability if lane was used in PrevMask
+		const float p = LaneHadPrev(i) ? (pBase * 0.35f) : pBase;
+
+		if (FMath::FRand() < p)
+		{
+			mask |= (one << i);
+			++extras;
+		}
 	}
+
 	return mask;
 }
 
@@ -730,14 +784,97 @@ void ALaneLevelGenerator::SpawnRuns(const TArray<FRowRun>& Runs,
 
 	const int32 lanes = FMath::Max(NumLanes, 1);
 
+	// Reference tile width in UU (derived from lane width and TilesPerLane)
+	const int32 safeTPL = FMath::Max(TilesPerLane, 1);
+	const float tileWUU = LaneWidthUU / float(safeTPL);
+
+	// Plan lengths per run first (so we can decide “only one if >6”)
+	struct FPlanned
+	{
+		int32 Index = 0;        // index into Runs
+		int32 TilesWide = 2;    // chosen (capped) tiles
+		int32 LenLanes = 1;     // run span in lanes
+		bool  bScaffold = false;
+	};
+
+	TArray<FPlanned> Planned;
+	Planned.Reserve(Runs.Num());
+
+	int32 idx = 0;
 	for (const FRowRun& R : Runs)
 	{
 		const int32 len = FMath::Clamp(R.LenLanes, 1, lanes);
-		const int32 tilesWide = FMath::Max(len, 1);
 
-		// desired local center (same as debug)
+		// Random length, then cap to fit inside this run (avoid overlap with neighbour runs)
+		const int32 rnd = FMath::Clamp(FMath::RandRange(MinTilesPerStrip, MaxTilesPerStrip), 2, 128);
+		const int32 maxTilesThatFit = len * safeTPL; // e.g. 2 lanes * 2 tilesPerLane = 4 tiles across
+		const int32 tilesWide = FMath::Clamp(rnd, 2, FMath::Max(2, maxTilesThatFit));
+
+		FPlanned P;
+		P.Index = idx++;
+		P.TilesWide = tilesWide;
+		P.LenLanes = len;
+		P.bScaffold = R.bScaffold;
+		Planned.Add(P);
+	}
+
+	// Conflict detection: Check if two platforms land in the same lane
+	TMap<int32, TArray<int32>> LanePlatformsMap; // Maps lane -> platform index
+
+	for (int i = 0; i < Planned.Num(); ++i)
+	{
+		const FPlanned& P = Planned[i];
+		const FRowRun& R = Runs[P.Index];
+
+		// Track platforms per lane
+		for (int j = R.StartLane; j < R.StartLane + P.LenLanes; ++j)
+		{
+			LanePlatformsMap.FindOrAdd(j).Add(i);
+		}
+	}
+
+	// Now, assign random platform types if more than 1 platform lands in the same lane
+	for (int i = 0; i < Planned.Num(); ++i)
+	{
+		const FPlanned& P = Planned[i];
+		const FRowRun& R = Runs[P.Index];
+
+		// Get the lanes this platform occupies
+		bool bHasConflict = false;
+		for (int j = R.StartLane; j < R.StartLane + P.LenLanes; ++j)
+		{
+			if (LanePlatformsMap[j].Num() > 1)
+			{
+				bHasConflict = true;
+				break;
+			}
+		}
+
+		// If conflict: Randomly change the platform type in the Planned array, ensuring they are different
+		if (bHasConflict)
+		{
+			// Randomly choose a new type for the conflicting platform (make sure they're different)
+			int32 newType = FMath::RandRange(2, 6);  // Random between 2 and 6 tiles
+
+			// Ensure that if we already had a platform with this type, we pick a different type
+			while (newType == P.TilesWide)
+			{
+				newType = FMath::RandRange(2, 6);
+			}
+
+			Planned[i].TilesWide = newType;  // Assign the new type
+		}
+	}
+
+	// Now spawn the platforms as usual
+	for (int32 pi = 0; pi < Planned.Num(); ++pi)
+	{
+		const FPlanned& P = Planned[pi];
+		const FRowRun& R = Runs[P.Index];
+
+		// placement: center of the run (same as your debug boxes)
 		const float leftCenterX = LaneCenterX_Local(R.StartLane, lanes, LaneWidthUU);
-		const float centerX = leftCenterX + 0.5f * float(len - 1) * LaneWidthUU;
+		const float centerX = leftCenterX + 0.5f * float(P.LenLanes - 1) * LaneWidthUU;
 
 		FVector localPos(centerX, LocalY, 0.f);
 		if (bLockPlatformsToPlayerY && PlayerRef)
@@ -749,14 +886,14 @@ void ALaneLevelGenerator::SpawnRuns(const TArray<FRowRun>& Runs,
 		const FVector worldPos = Axf.TransformPosition(localPos);
 		const FRotator worldRot = FRotator::ZeroRotator;
 
-		FActorSpawnParameters P;
-		P.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-		P.Owner = this;
+		FActorSpawnParameters Psp;
+		Psp.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+		Psp.Owner = this;
 
-		APlatformStrip* Plat = W->SpawnActor<APlatformStrip>(ScaffoldPlatformClass, worldPos, worldRot, P);
+		APlatformStrip* Plat = W->SpawnActor<APlatformStrip>(ScaffoldPlatformClass, worldPos, worldRot, Psp);
 		if (!Plat) { UE_LOG(LogTemp, Warning, TEXT("SpawnRuns: failed to spawn APlatformStrip")); continue; }
 
-		// visuals / tuning
+		// visuals/hazards
 		switch (R.Kind)
 		{
 		default:
@@ -767,27 +904,30 @@ void ALaneLevelGenerator::SpawnRuns(const TArray<FRowRun>& Runs,
 		Plat->SetSpriteRollDegrees(PlatformSpriteRollDeg);
 		Plat->CollisionHeightUU_Override = (PlatformCollisionHeightUU > 0.f) ? PlatformCollisionHeightUU : -1.f;
 
+		// pads/top-anchor etc. (if you added those setters earlier)
+		Plat->SetCollisionPads(PlatformCollisionPadXUU, PlatformCollisionPadYUU, PlatformCollisionTopBoostUU);
+		Plat->SetCollisionVisible(bRevealPlatformCollision);
+
 		Plat->AttachToComponent(Root, FAttachmentTransformRules::KeepWorldTransform);
 
-		// build
-		if (bUsePlatformSafeMode) Plat->BuildDebugFallback(tilesWide);
-		else                      Plat->BuildTiledByCount(tilesWide);
+		// build the exact width (flex)
+		if (bUsePlatformSafeMode)
+			Plat->BuildDebugFallback(P.TilesWide);
+		else
+			Plat->BuildTiledByCount_Flex(P.TilesWide);
 
-		// ---------- Clamp against walls (after build; uses real collider width) ----------
+		// ---- Clamp against walls (uses true collider half width) ----
 		{
-			// platform half width in UU (collider, not sprite)
 			const float halfX = Plat->GetCollisionHalfExtentX();
 
-			// compute the wall *face* positions we should stay inside
-			float faceLeftX = Xmin;  // fallback if no wall sprite data
+			float faceLeftX = Xmin;
 			float faceRightX = Xmax;
 
-			if (WallTileWUU > 0.f) // you cache this in BeginPlay()
+			if (WallTileWUU > 0.f)
 			{
 				const float leftColX = Xmin + WallInsetX;
 				const float rightColX = Xmax - WallInsetX;
 				const float halfWallW = 0.5f * WallTileWUU;
-
 				faceLeftX = leftColX + halfWallW - WallFaceContactInsetUU;
 				faceRightX = rightColX - halfWallW + WallFaceContactInsetUU;
 			}
@@ -795,18 +935,82 @@ void ALaneLevelGenerator::SpawnRuns(const TArray<FRowRun>& Runs,
 			const float minCenterX = faceLeftX + halfX + PlatformWallClearanceUU;
 			const float maxCenterX = faceRightX - halfX - PlatformWallClearanceUU;
 
-			// current local X of the actor
 			const FVector curLocal = Axf.InverseTransformPosition(Plat->GetActorLocation());
-			float clampedX = FMath::Clamp(curLocal.X, minCenterX, maxCenterX);
-
+			const float clampedX = FMath::Clamp(curLocal.X, minCenterX, maxCenterX);
 			if (!FMath::IsNearlyEqual(clampedX, curLocal.X, 0.1f))
 			{
 				const FVector newWorld = Axf.TransformPosition(FVector(clampedX, curLocal.Y, curLocal.Z));
 				Plat->SetActorLocation(newWorld, /*bSweep=*/false);
 			}
 		}
-		// -------------------------------------------------------------------------------
+		// -------------------------------------------------------------
 
 		OutActors.Add(Plat);
 	}
+}
+
+void ALaneLevelGenerator::DestroyAllRows()
+{
+	for (FRowBit& Row : LiveRows)
+	{
+		DespawnRow(Row);
+	}
+	LiveRows.Empty();
+	NextRowIndex = 0;
+	// park the cursor at current player Y so we can decide a fresh offset on resume
+	CursorLocalY = PlayerLocalY();
+}
+
+void ALaneLevelGenerator::DestroyAllWalls(bool bDisableBlockers)
+{
+	// visual tiles
+	for (auto* C : WallSpritesLeft)  if (C) C->DestroyComponent();
+	for (auto* C : WallSpritesRight) if (C) C->DestroyComponent();
+	WallSpritesLeft.Empty();
+	WallSpritesRight.Empty();
+
+	// reset streaming cursors
+	WallTopY = 0.f;
+	WallNextSpawnY = 0.f;
+
+	// optionally disable the blocking boxes too
+	if (bDisableBlockers)
+	{
+		if (LeftWall) { LeftWall->SetCollisionEnabled(ECollisionEnabled::NoCollision);  LeftWall->SetHiddenInGame(true); }
+		if (RightWall) { RightWall->SetCollisionEnabled(ECollisionEnabled::NoCollision); RightWall->SetHiddenInGame(true); }
+	}
+}
+
+void ALaneLevelGenerator::PauseAndFlush(bool bAlsoWalls, bool bDisableWallBlockers)
+{
+	// stop generation
+	bSpawnPlatforms = false;
+
+	// clear spawned content
+	DestroyAllRows();
+	if (bAlsoWalls) DestroyAllWalls(bDisableWallBlockers);
+
+	// reset “start after delay” state so resume is clean
+	PlatformSpawnStartTime = 0.f;
+	bFirstPlatformSpawn = true;
+}
+
+void ALaneLevelGenerator::ResumeSpawning(float StartDelaySeconds, float StartBelowPlayerScreens)
+{
+	// re-enable blockers if you had disabled them
+	if (LeftWall) { LeftWall->SetHiddenInGame(false);  LeftWall->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics); }
+	if (RightWall) { RightWall->SetHiddenInGame(false); RightWall->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics); }
+
+	// seed wall visuals again if you want them visible
+	if (bShowWalls) InitWallsInfinite();
+
+	// schedule spawning with your existing delay/first-spawn path
+	PlatformSpawnDelay = StartDelaySeconds;
+	PlatformSpawnStartTime = 0.f;     // let Tick set it on first frame
+	bFirstPlatformSpawn = true;
+
+	// choose where the very first row starts (below player)
+	PlatformSpawnOffsetY = StartBelowPlayerScreens * ScreenWorldHeightUU;
+
+	bSpawnPlatforms = true;
 }
