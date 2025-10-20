@@ -34,7 +34,11 @@ void ACPP_DownwellLiteCharacter::Tick(float DeltaSeconds)
 
 void ACPP_DownwellLiteCharacter::JumpFunction()
 {
-    if (CurrentAmmoCount >= 0) {
+    if (IsDead)
+    {
+
+    }
+    else if (CurrentAmmoCount >= 0) {
         bIsFalling = true;
         ClearIdleConfirmTimer();
         if (IsGrounded())

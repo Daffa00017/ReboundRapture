@@ -6,6 +6,7 @@
 #include "GameFramework/Pawn.h"
 #include "Engine/EngineTypes.h"
 #include "Enum/AIMovementState.h"
+#include "Components/HealthComponent.h"
 #include "CPP_EnemyParent.generated.h"
 
 class UCapsuleComponent;
@@ -14,6 +15,7 @@ class UPaperZDAnimSequence;
 class UPaperZDAnimInstance;
 class UPaperFlipbookComponent;
 class UFloatingPawnMovement;
+class HealthComponent;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnAIMoveStateChanged, EAIMovementState, Old, EAIMovementState, New);
 
@@ -42,6 +44,9 @@ public:
 	/** Lightweight movement good for 2D pawns */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Movement")
 	UFloatingPawnMovement* MoveComp;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	UHealthComponent* HealthComp;
 
 	/** Current movement state for PaperZD, UI, etc. */
 	UPROPERTY(BlueprintReadOnly, Category = "AI|State")
@@ -77,6 +82,45 @@ public:
 	// Optional: default anim instance class just for the arm (if you use state machines)
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Anim")
 	TSubclassOf<UPaperZDAnimInstance> BodyAnimInstanceClass;
+
+	//Pool Enemy
+
+	bool bActive = false;
+
+	UFUNCTION(BlueprintCallable) bool IsActive() const { return bActive; }
+
+	UFUNCTION(BlueprintCallable)
+	void ActivateFromPool(const FVector& WorldPos)
+	{
+		SetActorLocation(WorldPos);
+		SetActorHiddenInGame(false);
+		SetActorTickEnabled(true);
+		SetActorEnableCollision(true);
+		bActive = true;
+		OnPooledActivated();
+		// reset movement / state here
+	}
+
+	UFUNCTION(BlueprintCallable)
+	void DeactivateToPool()
+	{
+		SetActorHiddenInGame(true);
+		SetActorTickEnabled(false);
+		SetActorEnableCollision(false);
+		bActive = false;
+		OnPooledDeactivated();
+		// clear targets, velocities, etc.
+	}
+
+	// So Blueprint can just call this on “death” (no interface needed)
+	UFUNCTION(BlueprintCallable) void RequestDeactivate() 
+	{ 
+		DeactivateToPool(); 
+	}
+
+	// Optional: let BP react to pool events
+	UFUNCTION(BlueprintImplementableEvent) void OnPooledActivated();
+	UFUNCTION(BlueprintImplementableEvent) void OnPooledDeactivated();
 
 protected:
 	// Called when the game starts or when spawned

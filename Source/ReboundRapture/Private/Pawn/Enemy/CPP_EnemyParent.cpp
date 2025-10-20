@@ -41,6 +41,7 @@ ACPP_EnemyParent::ACPP_EnemyParent()
 	// We'll set AIControllerClass from C++ or the Blueprint (see controller below)
 
 	BodyAnim = CreateDefaultSubobject<UPaperZDAnimationComponent>(TEXT("PC_BodyAnim"));
+	HealthComp = CreateDefaultSubobject<UHealthComponent>(TEXT("HealthComponent"));
 }
 
 void ACPP_EnemyParent::SetAIMoveState(EAIMovementState NewState)

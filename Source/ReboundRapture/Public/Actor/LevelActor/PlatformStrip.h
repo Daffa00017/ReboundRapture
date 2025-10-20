@@ -21,6 +21,8 @@ enum class EPlatformKind : uint8 { Solid, Breakable, SpikeTop };
 
 class UBoxComponent;
 class UPaperSpriteComponent;
+struct FDamageEvent;
+struct FPointDamageEvent;
 
 UCLASS()
 class REBOUNDRAPTURE_API APlatformStrip : public AActor
@@ -47,6 +49,31 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tiling") UPaperSprite* Middle = nullptr;
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tiling") UPaperSprite* MiddleRight = nullptr;   // used in Five
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tiling") UPaperSprite* OuterRight = nullptr;
+
+    // --- Add under your existing sprite fields (keep your current ones) ---
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tiling|Breakable") UPaperSprite* Break_OuterLeft = nullptr;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tiling|Breakable") UPaperSprite* Break_MiddleLeft = nullptr;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tiling|Breakable") UPaperSprite* Break_Middle = nullptr;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tiling|Breakable") UPaperSprite* Break_MiddleRight = nullptr;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tiling|Breakable") UPaperSprite* Break_OuterRight = nullptr;
+
+    // Build mixed strips (some tiles solid, some breakable)
+    UFUNCTION(BlueprintCallable, Category = "Platform|Build")
+    void BuildTiledByCount_WithBreaks(int32 Count, const TArray<int32>& BreakIndices, bool bPerSegmentCollision);
+
+    // Break a specific tile at runtime (called by damage)
+    UFUNCTION(BlueprintCallable, Category = "Platform")
+    void BreakTile(int32 TileIndex);
+
+    // AActor override: route point-damage to a tile index
+    virtual float TakeDamage(float DamageAmount, struct FDamageEvent const& DamageEvent,
+        class AController* EventInstigator, AActor* DamageCauser) override;
+
+    UFUNCTION(BlueprintCallable, Category = "Platform|Breakable")
+    void BreakInRadius(const FVector& WorldCenter, float RadiusUU);
+
+    UFUNCTION(BlueprintCallable, Category = "Platform|Breakable")
+    void BreakAtWorldPoint(const FVector& WorldPoint); // still handy elsewhere
 
 
     // If you want 1 row high, collision height = tileH; otherwise expose this
@@ -121,6 +148,15 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Debug")
     void BuildDebugFallback(int32 TileCount);
 
+
+    //EnemySpawner
+
+    UFUNCTION(BlueprintPure, Category = "Platform|Spawn")
+    FVector GetTileCenterWorld(int32 TileIndex, float HoverZ = 8.f) const;
+
+    UFUNCTION(BlueprintPure, Category = "Platform|Spawn")
+    bool GetRandomSpawnPoint(int32& OutTileIdx, FVector& OutWorld, float HoverZ = 8.f, int32 ExcludeEdgeTiles = 1) const;
+
 protected:
     UPROPERTY(VisibleAnywhere) USceneComponent* Root;
     UPROPERTY(VisibleAnywhere) UBoxComponent* Box;
@@ -145,5 +181,24 @@ protected:
         case EPlatformKind::SpikeTop:  return SpikeTopMiddle ? SpikeTopMiddle : Middle;
         }
     }
+
+private :
+    // runtime bookkeeping
+    TArray<bool> TileIsBreakable;
+    TArray<bool> TileIsBroken;
+    TArray<UPaperSpriteComponent*> TileSprites; // optional, to hide on break
+    TArray<class UBoxComponent*> SegmentBoxes;  // per-segment colliders when we have holes
+
+    // last build geometry (to map hit->tile)
+    int32  BuiltCount = 0;
+    float  BuiltTileW = 16.f;
+    float  BuiltLeftX = 0.f;   // center of tile #0 in local X
+    float  BuiltTileH = 16.f;
+    bool  bUsingSegmentCollision = false;
+
+    void   RebuildSegmentCollision(); // build colliders for contiguous solid spans
+    UPaperSprite* PickSlotSprite(bool bBreak, int tileIndex, int total) const;
+
+    float CachedHalfExtentX = 0.f;
 };
 

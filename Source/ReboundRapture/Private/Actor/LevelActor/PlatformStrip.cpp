@@ -3,6 +3,11 @@
 
 #include "Actor/LevelActor/PlatformStrip.h"
 #include "Components/BoxComponent.h"
+#include "Kismet/GameplayStatics.h"
+#include "Engine/EngineTypes.h"     // FDamageEvent, FHitResult
+#include "Engine/DamageEvents.h"    // FPointDamageEvent, FRadialDamageEvent, and inline helpers
+#include "GameFramework/DamageType.h"
+#include "Engine/HitResult.h"
 
 // Sets default values
 APlatformStrip::APlatformStrip()
@@ -70,21 +75,114 @@ void APlatformStrip::ApplyCollisionSizing(float UsedWidthUU, float TileHeightUU)
     const float baseY = (CollisionHeightUU_Override > 0.f) ? CollisionHeightUU_Override : TileHeightUU;
 
     const float halfX = FMath::Max(UsedWidthUU * 0.5f + CollisionPadXUU, 2.f);
-
-    // Symmetric thickening on Y plus optional "top boost" amount
     const float halfY = FMath::Max(baseY * 0.5f + CollisionPadYUU * 0.5f + CollisionTopBoostYUU * 0.5f, 2.f);
-
-    // Keep Z as-is
     const float halfZ = FMath::Max(Box->GetUnscaledBoxExtent().Z, 2.f);
-
-    // Center shift:
-    //   - If anchoring top: put top face at local Y=0 => center at +halfY (remember +Y is down).
-    //   - Else: symmetric, only apply half of the one-sided top boost upward (-Y).
     const float centerShiftY = bCollisionAnchorTopToRow ? (+halfY) : (-0.5f * CollisionTopBoostYUU);
 
     Box->SetBoxExtent(FVector(halfX, halfY, halfZ), /*bUpdateOverlaps=*/true);
     Box->SetRelativeLocation(FVector(0.f, centerShiftY, 0.f));
     Box->MarkRenderStateDirty();
+
+    CachedHalfExtentX = halfX;   // << cache used for wall-clamp
+}
+
+void APlatformStrip::RebuildSegmentCollision()
+{
+    // clear old segments
+    for (UBoxComponent* B : SegmentBoxes) if (B) B->DestroyComponent();
+    SegmentBoxes.Empty();
+
+    // same Y/Z sizing as your big box so depth/height/anchor match
+    const float baseY = (CollisionHeightUU_Override > 0.f) ? CollisionHeightUU_Override : BuiltTileH;
+    const float halfY = FMath::Max(baseY * 0.5f + CollisionPadYUU * 0.5f + CollisionTopBoostYUU * 0.5f, 2.f);
+    const float centerShiftY = bCollisionAnchorTopToRow ? (+halfY) : (-0.5f * CollisionTopBoostYUU);
+    const float halfZ = FMath::Max(Box ? Box->GetUnscaledBoxExtent().Z : 2.f, 2.f);
+
+    auto solidAt = [&](int i)->bool
+        {
+            const bool breakable = (i < TileIsBreakable.Num()) ? TileIsBreakable[i] : false;
+            const bool broken = (i < TileIsBroken.Num()) ? TileIsBroken[i] : false;
+            // breakables are solid until actually broken
+            return !(breakable && broken);
+        };
+
+    float maxHalfX = 0.f;
+
+    int i = 0;
+    while (i < BuiltCount)
+    {
+        if (!solidAt(i)) { ++i; continue; }
+        int j = i;
+        while (j < BuiltCount && solidAt(j)) ++j; // [i..j-1] is one solid span
+
+        const int   spanCount = (j - i);
+        const float spanW = spanCount * BuiltTileW;
+
+        // >>> IMPORTANT: no X-pad on segments so they stay centered under their tiles.
+        const float halfX = FMath::Max(0.5f * spanW, 2.f);
+        const float centerX = BuiltLeftX + (float(i) + 0.5f * float(spanCount)) * BuiltTileW;
+
+        UBoxComponent* B = NewObject<UBoxComponent>(this);
+        B->RegisterComponent();
+        B->AttachToComponent(Root, FAttachmentTransformRules::KeepRelativeTransform);
+
+        // inherit profile; force enabled (big Box was disabled on first break)
+        if (Box)
+        {
+            B->SetCollisionProfileName(Box->GetCollisionProfileName());
+            B->SetCollisionObjectType(Box->GetCollisionObjectType());
+        }
+        else
+        {
+            B->SetCollisionProfileName(TEXT("BlockAll"));
+            B->SetCollisionObjectType(ECC_WorldStatic);
+        }
+        B->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+
+        B->SetBoxExtent(FVector(halfX, halfY, halfZ), /*update=*/true);
+        B->SetRelativeLocation(FVector(centerX, centerShiftY, 0.f));
+
+        SegmentBoxes.Add(B);
+        maxHalfX = FMath::Max(maxHalfX, halfX);
+
+        i = j;
+    }
+
+    // If you cache half-extent for wall clamp after breaking, you can keep this at 0
+    // or set to the max segment halfX. Your spawn-time clamp already used the big box.
+    // CachedHalfExtentX = (SegmentBoxes.Num() > 0) ? maxHalfX : 0.f;
+}
+
+UPaperSprite* APlatformStrip::PickSlotSprite(bool bBreak, int tileIndex, int total) const
+{
+    const bool twoCaps = (Style == ETileBand::TwoCaps);
+    const bool three = (Style == ETileBand::Three);
+    const bool five = (Style == ETileBand::Five);
+
+    auto pickBreak = [&](UPaperSprite* BreakSprite, UPaperSprite* Fallback)
+        { return bBreak && BreakSprite ? BreakSprite : (Fallback ? Fallback : Middle); };
+
+    if (twoCaps)
+    {
+        if (tileIndex == 0)        return bBreak ? (Break_OuterLeft ? Break_OuterLeft : OuterLeft) : OuterLeft;
+        else /* tileIndex == 1 */       return bBreak ? (Break_OuterRight ? Break_OuterRight : OuterRight) : OuterRight;
+    }
+    else if (three)
+    {
+        if (tileIndex == 0)        return bBreak ? (Break_OuterLeft ? Break_OuterLeft : OuterLeft) : OuterLeft;
+        else if (tileIndex == total - 1)  return bBreak ? (Break_OuterRight ? Break_OuterRight : OuterRight) : OuterRight;
+        else                             return pickBreak(Break_Middle, PickMiddle());
+    }
+    else /* five */
+    {
+        if (tileIndex == 0)        return bBreak ? (Break_OuterLeft ? Break_OuterLeft : OuterLeft) : OuterLeft;
+        else if (tileIndex == 1)        return bBreak ? (Break_MiddleLeft ? Break_MiddleLeft : (MiddleLeft ? MiddleLeft : PickMiddle()))
+            : (MiddleLeft ? MiddleLeft : PickMiddle());
+        else if (tileIndex == total - 2)  return bBreak ? (Break_MiddleRight ? Break_MiddleRight : (MiddleRight ? MiddleRight : PickMiddle()))
+            : (MiddleRight ? MiddleRight : PickMiddle());
+        else if (tileIndex == total - 1)  return bBreak ? (Break_OuterRight ? Break_OuterRight : OuterRight) : OuterRight;
+        else                             return pickBreak(Break_Middle, PickMiddle());
+    }
 }
 
 void APlatformStrip::BuildTiled(float TargetWidthUU)
@@ -252,6 +350,193 @@ void APlatformStrip::SetCollisionVisible(bool bVisible)
     Box->MarkRenderStateDirty();
 }
 
+void APlatformStrip::BuildTiledByCount_WithBreaks(int32 Count, const TArray<int32>& BreakIndices, bool bPerSegmentCollision)
+{
+    // Baseline to get size/PPUU (prefer hazard-aware middle)
+    UPaperSprite* Baseline = PickMiddle();
+    if (!Baseline) Baseline = Middle ? Middle : (OuterLeft ? OuterLeft : OuterRight);
+    if (!Baseline) return;
+
+    const FVector2f T = GetTileSizeUU(Baseline);
+    BuiltTileW = T.X;
+    BuiltTileH = T.Y;
+
+    // Clamp request and apply style minimums -> this is the real visual count
+    const int32 Raw = FMath::Clamp(Count, 2, 128);
+    int32 tilesUsed = Raw;
+    if (Style == ETileBand::TwoCaps) tilesUsed = FMath::Max(Raw, 2);
+    else if (Style == ETileBand::Three) tilesUsed = FMath::Max(Raw, 3);
+    else                                tilesUsed = FMath::Max(Raw, 5);
+
+    BuiltCount = tilesUsed;
+
+    const float usedW = tilesUsed * BuiltTileW;
+    BuiltLeftX = -0.5f * usedW + 0.5f * BuiltTileW;
+
+    // flags
+    TileIsBreakable.Init(false, BuiltCount);
+    TileIsBroken.Init(false, BuiltCount);
+    for (int idx : BreakIndices)
+        if (idx >= 0 && idx < BuiltCount) TileIsBreakable[idx] = true;
+
+    // visuals
+    ClearBuiltTiles();
+    TileSprites.Empty();
+    TileSprites.Reserve(BuiltCount);
+
+    for (int32 i = 0; i < BuiltCount; ++i)
+    {
+        const bool bBreak = TileIsBreakable[i];
+        UPaperSprite* S = PickSlotSprite(bBreak, i, BuiltCount);
+        AddTile(S, BuiltLeftX + float(i) * BuiltTileW, 0.f);
+
+        TArray<USceneComponent*> kids; Root->GetChildrenComponents(false, kids);
+        UPaperSpriteComponent* Comp = nullptr;
+        for (int c = kids.Num() - 1; c >= 0; --c)
+            if (auto* P = Cast<UPaperSpriteComponent>(kids[c])) { Comp = P; break; }
+        TileSprites.Add(Comp);
+    }
+
+    // ---- COLLISION: one box per tile (perfectly centered + exact tile width) ----
+    // Destroy any old boxes we might have
+    for (UBoxComponent* B : SegmentBoxes) if (B) B->DestroyComponent();
+    SegmentBoxes.Empty();
+    SegmentBoxes.Reserve(BuiltCount);
+
+    // size on Y/Z matches your big box logic so depth/height/anchor is consistent
+    const float baseY = (CollisionHeightUU_Override > 0.f) ? CollisionHeightUU_Override : BuiltTileH;
+    const float halfY = FMath::Max(baseY * 0.5f + CollisionPadYUU * 0.5f + CollisionTopBoostYUU * 0.5f, 2.f);
+    const float centerShiftY = bCollisionAnchorTopToRow ? (+halfY) : (-0.5f * CollisionTopBoostYUU);
+    const float halfZ = FMath::Max(Box ? Box->GetUnscaledBoxExtent().Z : 2.f, 2.f);
+
+    for (int32 i = 0; i < BuiltCount; ++i)
+    {
+        UBoxComponent* B = NewObject<UBoxComponent>(this);
+        B->RegisterComponent();
+        B->AttachToComponent(Root, FAttachmentTransformRules::KeepRelativeTransform);
+
+        // copy profile from the big box
+        if (Box)
+        {
+            B->SetCollisionProfileName(Box->GetCollisionProfileName());
+            B->SetCollisionObjectType(Box->GetCollisionObjectType());
+        }
+        else
+        {
+            B->SetCollisionProfileName(TEXT("BlockAll"));
+            B->SetCollisionObjectType(ECC_WorldStatic);
+        }
+        B->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+
+        const float halfX = FMath::Max(0.5f * BuiltTileW, 2.f); // EXACT tile width
+        const float centerX = BuiltLeftX + float(i) * BuiltTileW; // tile center
+
+        B->SetBoxExtent(FVector(halfX, halfY, halfZ), /*update=*/true);
+        B->SetRelativeLocation(FVector(centerX, centerShiftY, 0.f));
+
+        SegmentBoxes.Add(B);
+    }
+
+    // keep the big box only as a cached width for wall-clamp; disable/hide it
+    ApplyCollisionSizing(/*UsedWidthUU=*/usedW, /*TileHeightUU=*/BuiltTileH);
+    if (Box)
+    {
+        Box->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+        Box->SetHiddenInGame(true);         // optional: hide debug shape
+        Box->SetVisibility(false, true);    // optional: hide debug shape
+    }
+}
+
+void APlatformStrip::BreakTile(int32 TileIndex)
+{
+    if (TileIndex < 0 || TileIndex >= BuiltCount) return;
+    if (!TileIsBreakable.IsValidIndex(TileIndex) || !TileIsBreakable[TileIndex]) return;
+    if (!TileIsBroken.IsValidIndex(TileIndex) || TileIsBroken[TileIndex])    return;
+
+    TileIsBroken[TileIndex] = true;
+
+    // hide just that tile’s sprite
+    if (TileSprites.IsValidIndex(TileIndex) && TileSprites[TileIndex])
+    {
+        TileSprites[TileIndex]->SetHiddenInGame(true);
+        TileSprites[TileIndex]->SetVisibility(false, true);
+    }
+
+    // disable only that tile’s collider
+    if (SegmentBoxes.IsValidIndex(TileIndex) && SegmentBoxes[TileIndex])
+    {
+        SegmentBoxes[TileIndex]->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    }
+}
+
+float APlatformStrip::TakeDamage(float DamageAmount, FDamageEvent const& DamageEvent, AController* EventInstigator, AActor* DamageCauser)
+{
+    // get a best-effort impact point
+    FHitResult Hit;
+    FVector   ImpulseDir = FVector::ZeroVector;
+    DamageEvent.GetBestHitInfo(this, DamageCauser, Hit, ImpulseDir);
+
+    const FVector worldHit =
+        Hit.bBlockingHit ? Hit.ImpactPoint :
+        (DamageCauser ? DamageCauser->GetActorLocation() : GetActorLocation());
+
+    // map local X to tile index (tile 0 centered at BuiltLeftX)
+    const FVector local = GetActorTransform().InverseTransformPosition(worldHit);
+    const float   denom = FMath::Max(BuiltTileW, 0.001f);
+    const int32   tile = FMath::Clamp(FMath::RoundToInt((local.X - BuiltLeftX) / denom),
+        0, FMath::Max(0, BuiltCount - 1));
+
+    BreakTile(tile);
+    return DamageAmount;
+}
+
+void APlatformStrip::BreakInRadius(const FVector& WorldCenter, float RadiusUU)
+{
+    if (BuiltCount <= 0 || BuiltTileW <= KINDA_SMALL_NUMBER) return;
+
+    const FVector L = GetActorTransform().InverseTransformPosition(WorldCenter);
+    const float   r = FMath::Max(RadiusUU, 0.f);
+
+    // convert radius in X to tile index range
+    const float leftX  = L.X - r;
+    const float rightX = L.X + r;
+
+    int32 iLo = FMath::FloorToInt((leftX  - BuiltLeftX) / BuiltTileW);
+    int32 iHi = FMath::FloorToInt((rightX - BuiltLeftX) / BuiltTileW);
+    iLo = FMath::Clamp(iLo, 0, BuiltCount - 1);
+    iHi = FMath::Clamp(iHi, 0, BuiltCount - 1);
+
+    bool changed=false;
+    for (int32 i=iLo; i<=iHi; ++i)
+    {
+        if (TileIsBreakable.IsValidIndex(i) && !TileIsBroken[i])
+        {
+            TileIsBroken[i] = true;
+            if (TileSprites.IsValidIndex(i) && TileSprites[i])
+            {
+                TileSprites[i]->SetHiddenInGame(true);
+                TileSprites[i]->SetVisibility(false, true);
+            }
+            changed = true;
+        }
+    }
+    if (changed)
+    {
+        if (SegmentBoxes.Num()==0 && Box)
+            Box->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+        RebuildSegmentCollision();
+    }
+}
+
+void APlatformStrip::BreakAtWorldPoint(const FVector& WorldPoint)
+{
+    if (BuiltCount <= 0 || BuiltTileW <= KINDA_SMALL_NUMBER) return;
+    const FVector L = GetActorTransform().InverseTransformPosition(WorldPoint);
+    const int32 idx = FMath::Clamp(
+        FMath::RoundToInt((L.X - BuiltLeftX) / BuiltTileW), 0, BuiltCount - 1);
+    BreakTile(idx);
+}
+
 void APlatformStrip::BuildTiledByCount_Safe(int32 TileCount)
 {
     // Validate sprites needed for the chosen Style.
@@ -361,7 +646,7 @@ void APlatformStrip::SetCollisionPads(float InPadX, float InPadY, float InTopBoo
 
 float APlatformStrip::GetCollisionHalfExtentX() const
 {
-    return (Box ? Box->GetScaledBoxExtent().X : 0.f);
+    return CachedHalfExtentX;
 }
 
 void APlatformStrip::SetSizeUU(float WidthUU, float HeightUU)
@@ -394,5 +679,28 @@ void APlatformStrip::BuildDebugFallback(int32 TileCount)
 
     // Just size the collider; no sprite tiles needed for the fallback
     ApplyCollisionSizing(/*UsedWidthUU=*/usedW, /*TileHeightUU=*/tileH);
+}
+
+FVector APlatformStrip::GetTileCenterWorld(int32 TileIndex, float HoverZ) const
+{
+    // clamp just in case
+    if (BuiltCount <= 0) return GetActorLocation();
+    TileIndex = FMath::Clamp(TileIndex, 0, BuiltCount - 1);
+
+    const float x = BuiltLeftX + float(TileIndex) * BuiltTileW; // center of that tile
+    const FVector local(x, 0.f, HoverZ);
+    return GetActorTransform().TransformPosition(local);
+}
+
+bool APlatformStrip::GetRandomSpawnPoint(int32& OutTileIdx, FVector& OutWorld, float HoverZ, int32 ExcludeEdgeTiles) const
+{
+    if (BuiltCount <= (ExcludeEdgeTiles * 2)) return false;
+
+    const int32 lo = ExcludeEdgeTiles;
+    const int32 hi = BuiltCount - 1 - ExcludeEdgeTiles;
+
+    OutTileIdx = FMath::RandRange(lo, hi);
+    OutWorld = GetTileCenterWorld(OutTileIdx, HoverZ);
+    return true;
 }
 

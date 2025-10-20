@@ -5,11 +5,13 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "Actor/LevelActor/PlatformStrip.h"
+#include "Pawn/Enemy/CPP_EnemyParent.h"
 #include "LaneLevelGenerator.generated.h"
 
 class UPaperSprite;
 class UBoxComponent;
 class APlatformStrip;
+class ACPP_EnemyParent; // fwd
 
 UCLASS()
 class REBOUNDRAPTURE_API ALaneLevelGenerator : public AActor
@@ -221,7 +223,20 @@ protected:
 	int32 MinTilesPerStrip = 2;
 
 	UPROPERTY(EditAnywhere, Category = "Platforms|Spawn")
-	int32 MaxTilesPerStrip = 7;
+	int32 MaxTilesPerStrip = 12;
+
+	// ---- Row spawn rules ----
+	UPROPERTY(EditAnywhere, Category = "Platforms|Spawn", meta = (ClampMin = "2"))
+	int32 SoloStripAtOrAboveTiles = 12;   // if any strip in the row has this many tiles or more, spawn only that one
+
+	UPROPERTY(EditAnywhere, Category = "Platforms|Spawn")
+	bool bForceDifferentSameRow = true;   // keep tile counts distinct across strips in the same row
+
+	UPROPERTY(EditAnywhere, Category = "Platforms|Spawn", meta = (ClampMin = "1"))
+	int32 MinTileCountDeltaSameRow = 1;   // at least this much difference (1 = “not equal”)
+
+	UPROPERTY(EditAnywhere, Category = "Platforms|Spawn", meta = (ClampMin = "0.0"))
+	float TileCountWeightExp = 1.4f;      // >0 biases toward longer strips; 0 = uniform
 
 	UPROPERTY(EditAnywhere, Category = "Platforms|Spawn")
 	float PlatformSpawnDelay = 1.2f;
@@ -310,7 +325,54 @@ protected:
 	UPROPERTY(EditAnywhere, Category = "Debug")
 	bool bRevealPlatformCollision = false;
 
+	//EnemiesSpawner
+	UPROPERTY(EditAnywhere, Category = "Enemies")
+	TSubclassOf<ACPP_EnemyParent> WalkerEnemyClass;
 
+	UPROPERTY(EditAnywhere, Category = "Enemies")
+	TSubclassOf<ACPP_EnemyParent> FlyerEnemyClass;
+
+	UPROPERTY(EditAnywhere, Category = "Enemies")
+	int32 MinTilesForWalker = 6;
+
+	UPROPERTY(EditAnywhere, Category = "Enemies")
+	float WalkerHoverZ = 12.f;        // how high above the strip to drop the pawn
+
+	UPROPERTY(EditAnywhere, Category = "Enemies")
+	float WalkerSpawnChance = 1.0f;   // 0..1 scalar; set <1 if you want variety
+
+	UPROPERTY(EditAnywhere, Category = "Enemies")
+	float FlyerSpawnAboveZ = 220.f;   // spawn flyers higher up than platforms
+
+	// PoolEnemies
+	UPROPERTY(EditAnywhere, Category = "Enemies|Pool") int32 PoolSize_Walker = 12;
+	UPROPERTY(EditAnywhere, Category = "Enemies|Pool") int32 PoolSize_Flyer = 8;
+	UPROPERTY(EditAnywhere, Category = "Enemies|Pool") int32 MaxActive_Walker = 6;
+	UPROPERTY(EditAnywhere, Category = "Enemies|Pool") int32 MaxActive_Flyer = 4;
+
+	// NEW: despawn band and recycle cadence
+	UPROPERTY(EditAnywhere, Category = "Enemies|Pool") float DespawnAfterYDelta = 2000.f;
+	UPROPERTY(EditAnywhere, Category = "Enemies|Pool") float RecycleInterval = 0.25f;
+
+	// NEW: optional spacing so we don’t spawn too often vertically
+	UPROPERTY(EditAnywhere, Category = "Enemies|Pool") float MinYBetweenSpawns_Walker = 700.f;
+	UPROPERTY(EditAnywhere, Category = "Enemies|Pool") float MinYBetweenSpawns_Flyer = 1000.f;
+
+	// MUST be UPROPERTY so GC keeps references
+	UPROPERTY() TArray<TObjectPtr<ACPP_EnemyParent>> WalkerPool;
+	UPROPERTY() TArray<TObjectPtr<ACPP_EnemyParent>> FlyerPool;
+
+	float NextWalkerY = -FLT_MAX;
+	float NextFlyerY = -FLT_MAX;
+
+	// ---- Enemy local-depth gates (NEW) ----
+	UPROPERTY(EditAnywhere, Category = "Enemies|Pool") float WalkerMinDYBetweenSpawnsUU = 400.f;
+	UPROPERTY(EditAnywhere, Category = "Enemies|Pool") float FlyerMinDYBetweenSpawnsUU = 600.f;
+
+	float NextWalkerLocalY = -FLT_MAX;
+	float NextFlyerLocalY = -FLT_MAX;
+
+	
 
 private:
 
@@ -427,6 +489,15 @@ private:
 	// Spawn runs with chosen Kind; pushes created actors to OutActors
 	void SpawnRuns(const TArray<FRowRun>& Runs, float LocalY, TArray<TWeakObjectPtr<class APlatformStrip>>& OutActors);
 
+	//EnemiesSpawnerHelper
+	void TrySpawnEnemyOnStrip(class APlatformStrip* Plat, int32 TilesWide, ERunKind RunKind);
 
+	// --- pool helpers (private) ---
+	void WarmEnemyPools();
+	ACPP_EnemyParent* BorrowFromPool(TArray<TObjectPtr<ACPP_EnemyParent>>& Pool, TSubclassOf<ACPP_EnemyParent> Cls, int32 PoolCap);
+	void TryEnemiesPool();
+	void RecycleIfOutOfWindow(ACPP_EnemyParent* E, float PlayerY);
+
+	FTimerHandle PoolTimer;
 
 };
