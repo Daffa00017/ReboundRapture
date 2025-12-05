@@ -210,6 +210,30 @@
 				"Win64",
 				"Linux"
 			]
+		},
+		{
+			"Name": "AnimationData",
+			"Enabled": false
+		},
+		{
+			"Name": "ControlRigSpline",
+			"Enabled": false
+		},
+		{
+			"Name": "SequencerAnimTools",
+			"Enabled": false
+		},
+		{
+			"Name": "ControlRig",
+			"Enabled": false
+		},
+		{
+			"Name": "RigVM",
+			"Enabled": false
+		},
+		{
+			"Name": "RawInput",
+			"Enabled": true
 		}
 	]
 }

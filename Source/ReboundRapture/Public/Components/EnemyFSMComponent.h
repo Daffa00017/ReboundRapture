@@ -18,7 +18,7 @@ enum class EEnemyMode : uint8
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnEnemyStateChanged, EEnemyMode, OldState, EEnemyMode, NewState);
 
-UCLASS(ClassGroup = (AI), meta = (BlueprintSpawnableComponent))
+UCLASS(ClassGroup = (AI), Blueprintable, meta = (BlueprintSpawnableComponent))
 class REBOUNDRAPTURE_API UEnemyFSMComponent : public UActorComponent
 {
 	GENERATED_BODY()
@@ -32,6 +32,10 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Blackboard") FName BB_DistToTarget = "DistToTarget";
 	UPROPERTY(EditAnywhere, Category = "Blackboard") FName BB_AttackTarget = "AttackTarget";
 
+	// NEW: coop alert keys
+	UPROPERTY(EditAnywhere, Category = "Blackboard") FName BB_IsAlerted = "IsAlerted";
+	UPROPERTY(EditAnywhere, Category = "Blackboard") FName BB_AlertLocation = "AlertLocation";
+
 	// Sensing / tuning
 	UPROPERTY(EditAnywhere, Category = "Sense") float LOSInterval = 0.15f; // 6-7 Hz
 	UPROPERTY(EditAnywhere, Category = "Sense") float SightRange = 2000.f;
@@ -41,6 +45,9 @@ public:
 	// Distance band used for deciding HoldBand vs too far/too close (matches your task)
 	UPROPERTY(EditAnywhere, Category = "Combat") float PreferMin = 450.f;
 	UPROPERTY(EditAnywhere, Category = "Combat") float PreferMax = 650.f;
+
+	// NEW: how far the shout reaches (0 = global)
+	UPROPERTY(EditAnywhere, Category = "Coop") float CoopAlertRadius = 2000.f;
 
 	// API
 	UPROPERTY(BlueprintAssignable, Category = "FSM") FOnEnemyStateChanged OnStateChanged;
@@ -62,6 +69,12 @@ public:
 	// internal
 	float LastSeenTime = -1000.f;
 
+	UPROPERTY(EditAnywhere, Category = "State")
+	float MaxRepositionDuration = 4.0f;
+
+	UPROPERTY(EditAnywhere, Category = "Coop")
+	float CoopAlertDuration = 5.0f;
+
 protected:
 	virtual void BeginPlay() override;
 
@@ -74,12 +87,21 @@ private:
 	FTimerHandle SenseTimer;
 	FTimerHandle InitRetryTimer;
 
+	// NEW: remember if we had a target last tick
+	bool bHadTargetLastTick = false;
+
 	// Core
 	void SenseAndDecide();            // runs at LOSInterval
 	void ChangeState(EEnemyMode NewState);
 	void PushBB(EEnemyMode Mode, bool bHasLOS, float Dist);
 
+	// NEW: broadcast coop alert
+	void BroadcastAlert(const FVector& AlertPos);
+
 	// Helpers
 	bool LOS2D(const APawn* Me, const AActor* T, float& OutDist) const;
 	const AActor* GetTarget() const;
+
+	float StateEnterTime = 0.f;
+	float LastAlertTime = -1000.f;
 };

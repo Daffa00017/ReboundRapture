@@ -9,6 +9,7 @@
 #include "PaperFlipbookComponent.h"
 #include "GameFramework/FloatingPawnMovement.h"
 #include "Kismet/GameplayStatics.h"
+#include "Utility/Util_BpAsyncEnemyAnim.h"
 #include "AIController.h"
 
 
@@ -18,6 +19,7 @@ ACPP_EnemyParent::ACPP_EnemyParent()
  	// Set this pawn to call Tick() every frame.  You can turn this off to improve performance if you don't need it.
 	PrimaryActorTick.bCanEverTick = true;
 
+	HealthComp = CreateDefaultSubobject<UHealthComponent>(TEXT("HealthComponent"));
 	// Root collision
 	Capsule = CreateDefaultSubobject<UCapsuleComponent>(TEXT("Capsule"));
 	SetRootComponent(Capsule);
@@ -43,12 +45,57 @@ ACPP_EnemyParent::ACPP_EnemyParent()
 	BodyAnim = CreateDefaultSubobject<UPaperZDAnimationComponent>(TEXT("PC_BodyAnim"));
 }
 
+void ACPP_EnemyParent::HandleAnimsLoaded_Internal(FName RowName, const FEnemyAnimResolved& Anim)
+{
+	UE_LOG(LogTemp, Log, TEXT("Anims loaded for: %s"), *RowName.ToString());
+
+	// 1. Store the anims so you can use them in C++
+	ResolvedAnims = Anim;
+
+	// 2. As you said, no special C++ interface logic. Keeping it simple.
+
+	// 3. Broadcast the BLUEPRINT delegate!
+	OnAnimsReady.Broadcast(ResolvedAnims);
+}
+
+void ACPP_EnemyParent::HandleAnimLoadFailed_Internal()
+{
+	UE_LOG(LogTemp, Error, TEXT("FAILED to load anims for row: %s"), *AnimationRowName.ToString());
+
+	// Broadcast the BLUEPRINT fail delegate
+	OnAnimsLoadFailed.Broadcast();
+}
+
 void ACPP_EnemyParent::SetAIMoveState(EAIMovementState NewState)
 {
 	if (AIMoveState == NewState) return;      // no spam
 	const EAIMovementState Old = AIMoveState;
 	AIMoveState = NewState;
 	OnAIMoveStateChanged.Broadcast(Old, NewState);
+}
+
+void ACPP_EnemyParent::ActivateFromPool(const FVector& WorldPos)
+{
+	HealthComp->isDead = false;
+	HealthComp->SetCurrentHealth(HealthComp->GetMaxHealth());
+	SetActorLocation(WorldPos);
+	SetActorHiddenInGame(false);
+	SetActorTickEnabled(true);
+	SetActorEnableCollision(true);
+	EAIMovementState::Idle;
+	bActive = true;
+	OnPooledActivated();
+	// reset movement / state here
+}
+
+void ACPP_EnemyParent::DeactivateToPool()
+{
+	HealthComp->isDead = true;
+	
+	SetActorEnableCollision(false);
+	bActive = false;
+	OnPooledDeactivated();
+	// clear targets, velocities, etc.
 }
 
 // Called when the game starts or when spawned
@@ -61,6 +108,37 @@ void ACPP_EnemyParent::BeginPlay()
 		MoveComp->MaxSpeed = MaxSpeed;
 		MoveComp->Acceleration = Accel;
 		MoveComp->Deceleration = FMath::Max(1000.f, Friction * 100.f);
+	}
+
+	if (AnimationDataTable && !AnimationRowName.IsNone())
+	{
+		// 1. Create the Async Action
+		AnimLoadAction = UUtil_BpAsyncEnemyAnim::LoadEnemyAnimRowAsync(
+			this,
+			AnimationDataTable,
+			AnimationRowName,
+			-1 // VariantIndex
+		);
+
+		if (AnimLoadAction)
+		{
+			// 2. Bind our C++ functions to the action's delegates
+			//
+			//    *** THIS IS THE FIX ***
+			//    Use your class name 'ACPP_EnemyParent' not 'AMyBaseEnemy'
+			//
+			AnimLoadAction->OnCompleted.AddDynamic(this, &ACPP_EnemyParent::HandleAnimsLoaded_Internal);
+			AnimLoadAction->OnFailed.AddDynamic(this, &ACPP_EnemyParent::HandleAnimLoadFailed_Internal);
+
+			// 3. Start the action
+			AnimLoadAction->Activate();
+		}
+	}
+	else
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Enemy '%s' has no AnimationDataTable or AnimationRowName set."), *GetName());
+		// Instantly fire the fail delegate
+		OnAnimsLoadFailed.Broadcast();
 	}
 }
 
@@ -76,4 +154,3 @@ void ACPP_EnemyParent::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
 	Super::SetupPlayerInputComponent(PlayerInputComponent);
 
 }
-

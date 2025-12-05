@@ -204,7 +204,6 @@ void ACPP_PlayerCharacter::UpdateRotationBasedOnCursor()
     }
 }
 
-
 bool ACPP_PlayerCharacter::GetArmAimDirection(FVector& OutDir) const
 {
     if (!ArmPivot) return false;
@@ -284,14 +283,14 @@ void ACPP_PlayerCharacter::Landed(const FHitResult& Hit)
     CurrentJumpCount = 0;
     Super::Landed(Hit);
     bIsFalling = false;
-    GetWorldTimerManager().ClearTimer(IdleConfirmTimer);  // kill any pending idle confirm
+    ClearIdleConfirmTimer();
     CustomEventOnLanded(Hit);
 
     // resolve to ground locomotion
     if (bLeftHeld || bRightHeld)
-        ChangeMovementState(EMovementState::Walk);
+        ChangeMovementState(EE_PlayerMovementState::Walk);
     else
-        ChangeMovementState(EMovementState::Idle);
+        ChangeMovementState(EE_PlayerMovementState::Idle);
 }
 
 void ACPP_PlayerCharacter::UpdateArmAim()
@@ -357,28 +356,11 @@ FTransform ACPP_PlayerCharacter::GetMuzzleSpawnTransform() const
     return FTransform(AimRot, SpawnLoc, FVector(1.f));
 }
 
-void ACPP_PlayerCharacter::ChangeMovementState(EMovementState NewState)
-{
-    if (NewState == CurrentMovementState) return;
-
-    const EMovementState Old = CurrentMovementState;
-    CurrentMovementState = NewState;
-
-    // optional: clear idle timer on explicit state changes
-    GetWorldTimerManager().ClearTimer(IdleConfirmTimer);
-
-    OnMovementStateChanged.Broadcast(Old, CurrentMovementState);
-}
-
-
 void ACPP_PlayerCharacter::CustomEventOnLanded_Implementation(FHitResult HitResult)
 {
     // Optional: default behavior
     UE_LOG(LogTemp, Warning, TEXT("CustomEventOnLanded called in C++"));
 }
-
-
-
 
 bool ACPP_PlayerCharacter::GetCursorWorldOnCharacterPlane(FVector& OutWorld) const
 {
@@ -451,156 +433,35 @@ bool ACPP_PlayerCharacter::GetCharacterScreenPosition(FVector2D& OutPos) const
     );
 }
 
-void ACPP_PlayerCharacter::MoveHorizontal(const FInputActionValue& Value)
+void ACPP_PlayerCharacter::OnMoveLeftStarted(const FInputActionValue& Value)
 {
-    // Get Axis value (-1 to 1)
-    const float AxisValue = Value.Get<float>();
-
-    // Add movement input along X axis for side-scroller
-    AddMovementInput(FVector(1.f, 0.f, 0.f), AxisValue);
+    HandleMove(true , ETriggerEvent::Started  , Value);
 }
 
-bool ACPP_PlayerCharacter::IsGrounded() const
+void ACPP_PlayerCharacter::OnMoveLeftTriggered(const FInputActionValue& Value)
 {
-    const UCharacterMovementComponent* CM = GetCharacterMovement();
-    if (!CM) return false;
-    // bAirborne is our lock; sometimes CM flickers for a frame
-    return !bIsFalling && !CM->IsFalling() && CM->IsMovingOnGround();
+    HandleMove(true, ETriggerEvent::Triggered, Value);
 }
 
-void ACPP_PlayerCharacter::OnMoveLeftStarted(const FInputActionValue&)
+void ACPP_PlayerCharacter::OnMoveLeftCompleted(const FInputActionValue& Value)
 {
-    bLeftHeld = true;
-    const int Combined = GetCombinedAxis();
-    const bool bBoth = (bLeftHeld && bRightHeld);
-
-    if (Combined != 0)
-    {
-        GetWorldTimerManager().ClearTimer(IdleConfirmTimer);
-        if (IsGrounded() && CurrentMovementState != EMovementState::Walk)
-            ChangeMovementState(EMovementState::Walk);
-    }
-
-    if (bBoth && !bWasBothHeld && IsGrounded())
-    {
-        ScheduleIdleConfirm();
-        bWasBothHeld = true;
-    }
-}
-
-void ACPP_PlayerCharacter::OnMoveLeftTriggered(const FInputActionValue&)
-{
-    bLeftHeld = true;
-    RecomputeAxisAndSpeed();
-
-    const int Combined = GetCombinedAxis();
-    const bool bBoth = (bLeftHeld && bRightHeld);
-
-    if (Combined != 0)
-    {
-        GetWorldTimerManager().ClearTimer(IdleConfirmTimer);
-        if (IsGrounded() && CurrentMovementState != EMovementState::Walk)
-            ChangeMovementState(EMovementState::Walk);
-    }
-
-    if (bBoth && !bWasBothHeld && IsGrounded())
-    {
-        ScheduleIdleConfirm();
-        bWasBothHeld = true;
-    }
-}
-
-void ACPP_PlayerCharacter::OnMoveLeftCompleted(const FInputActionValue&)
-{
-    bLeftHeld = false;
-    RecomputeAxisAndSpeed();
-
-    const int Combined = GetCombinedAxis();
-    const bool bBoth = (bLeftHeld && bRightHeld);
-
-    if (!bRightHeld)
-    {
-        if (IsGrounded()) ScheduleIdleConfirm();
-    }
-    else
-    {
-        if (!bBoth && bWasBothHeld)
-        {
-            GetWorldTimerManager().ClearTimer(IdleConfirmTimer);
-            bWasBothHeld = false;
-        }
-
-        if (Combined != 0 && IsGrounded() && CurrentMovementState != EMovementState::Walk)
-            ChangeMovementState(EMovementState::Walk);
-    }
+    HandleMove(true, ETriggerEvent::Completed, Value);
 }
 
 // === RIGHT (mirror) ===
-void ACPP_PlayerCharacter::OnMoveRightStarted(const FInputActionValue&)
+void ACPP_PlayerCharacter::OnMoveRightStarted(const FInputActionValue& Value)
 {
-    bRightHeld = true;
-    const int Combined = GetCombinedAxis();
-    const bool bBoth = (bLeftHeld && bRightHeld);
-
-    if (Combined != 0)
-    {
-        GetWorldTimerManager().ClearTimer(IdleConfirmTimer);
-        if (IsGrounded() && CurrentMovementState != EMovementState::Walk)
-            ChangeMovementState(EMovementState::Walk);
-    }
-
-    if (bBoth && !bWasBothHeld && IsGrounded())
-    {
-        ScheduleIdleConfirm();
-        bWasBothHeld = true;
-    }
+    HandleMove(false, ETriggerEvent::Started, Value);
 }
 
-void ACPP_PlayerCharacter::OnMoveRightTriggered(const FInputActionValue&)
+void ACPP_PlayerCharacter::OnMoveRightTriggered(const FInputActionValue& Value)
 {
-    bRightHeld = true;
-    RecomputeAxisAndSpeed();
-
-    const int Combined = GetCombinedAxis();
-    const bool bBoth = (bLeftHeld && bRightHeld);
-
-    if (Combined != 0)
-    {
-        GetWorldTimerManager().ClearTimer(IdleConfirmTimer);
-        if (IsGrounded() && CurrentMovementState != EMovementState::Walk)
-            ChangeMovementState(EMovementState::Walk);
-    }
-
-    if (bBoth && !bWasBothHeld && IsGrounded())
-    {
-        ScheduleIdleConfirm();
-        bWasBothHeld = true;
-    }
+    HandleMove(false, ETriggerEvent::Triggered, Value);
 }
 
-void ACPP_PlayerCharacter::OnMoveRightCompleted(const FInputActionValue&)
+void ACPP_PlayerCharacter::OnMoveRightCompleted(const FInputActionValue& Value)
 {
-    bRightHeld = false;
-    RecomputeAxisAndSpeed();
-
-    const int Combined = GetCombinedAxis();
-    const bool bBoth = (bLeftHeld && bRightHeld);
-
-    if (!bLeftHeld)
-    {
-        if (IsGrounded()) ScheduleIdleConfirm();
-    }
-    else
-    {
-        if (!bBoth && bWasBothHeld)
-        {
-            GetWorldTimerManager().ClearTimer(IdleConfirmTimer);
-            bWasBothHeld = false;
-        }
-
-        if (Combined != 0 && IsGrounded() && CurrentMovementState != EMovementState::Walk)
-            ChangeMovementState(EMovementState::Walk);
-    }
+    HandleMove(false, ETriggerEvent::Completed, Value);
 }
 
 void ACPP_PlayerCharacter::RecomputeAxisAndSpeed()
@@ -617,67 +478,7 @@ void ACPP_PlayerCharacter::RecomputeAxisAndSpeed()
     if (!FMath::IsNearlyEqual(MoveAxis, LastAxisSent, AxisEpsilon))
     {
         LastAxisSent = MoveAxis;
-        OnMoveAxisUpdatedDelegate.Broadcast(MoveAxis, AnimSpeedX);
-    }
-}
-
-void ACPP_PlayerCharacter::UpdateMovementStateFromAxis()
-{
-    const bool bAnyHeld = bLeftHeld || bRightHeld;            // ← key idea
-    const bool bMovingBySpeed = AnimSpeedX > WalkSpeedThreshold;
-
-    EMovementState Desired = CurrentMovementState;
-
-    if (bAnyHeld || bMovingBySpeed)
-    {
-        // If any input is held (even if MoveAxis == 0 due to both pressed),
-        // or we’re still moving by speed, stay in Walk.
-        Desired = EMovementState::Walk;
-        TimeSinceInputReleased = 0.f; // reset just in case
-    }
-    else
-    {
-        // Both inputs released — require a short confirm delay before Idle
-        if (TimeSinceInputReleased >= IdleConfirmDelay)
-        {
-            Desired = EMovementState::Idle;
-        }
-        // else: keep previous state (usually Walk) during the grace window
-    }
-
-    if (Desired != CurrentMovementState)
-    {
-        const EMovementState Old = CurrentMovementState;
-        CurrentMovementState = Desired;
-        OnMovementStateChanged.Broadcast(Old, CurrentMovementState);
-    }
-}
-
-void ACPP_PlayerCharacter::ScheduleIdleConfirm()
-{
-    // ✅ ignore while in air
-    if (!IsGrounded()) return;  // never idle mid-air
-    GetWorldTimerManager().ClearTimer(IdleConfirmTimer);
-    GetWorldTimerManager().SetTimer(
-        IdleConfirmTimer, this, &ThisClass::ConfirmIdle,
-        IdleConfirmDelay, false
-    );
-}
-
-void ACPP_PlayerCharacter::ConfirmIdle()
-{
-    // ✅ also bail if we somehow became airborne
-    if (!IsGrounded()) return;
-    if (GetCombinedAxis() == 0)
-        ChangeMovementState(EMovementState::Idle);
-}
-
-void ACPP_PlayerCharacter::CommitWalkIfStillDirected()
-{
-    const int CombinedAxis = GetCombinedAxis();
-    if (CombinedAxis != 0 && CurrentMovementState != EMovementState::Walk)
-    {
-        ChangeMovementState(EMovementState::Walk);
+        BroadcastMoveAxis(MoveAxis, AnimSpeedX);
     }
 }
 
@@ -709,11 +510,11 @@ void ACPP_PlayerCharacter::OnJumpStarted(const FInputActionValue& Value)
         bJumpInput = true;
         bIsFalling = true;
         OnJumpStartedEvent.Broadcast(GetScalar01(Value));
-        GetWorldTimerManager().ClearTimer(IdleConfirmTimer);
+        ClearIdleConfirmTimer();
         // TODO: Call Jump(); or custom jump logic
         CurrentJumpCount = CurrentJumpCount + 1 ;
         Jump();
-        ChangeMovementState(EMovementState::Jump);
+        ChangeMovementState(EE_PlayerMovementState::Jump);
         //UE_LOG(LogTemp, Warning, TEXT("JumpCount: %d"), CurrentJumpCount);
     }
 
@@ -794,6 +595,64 @@ void ACPP_PlayerCharacter::OnAimCompleted(const FInputActionValue& /*Value*/)
     bAimInput = false;
     OnAimCompletedEvent.Broadcast();
     // Optional: bIsAiming = false; restore FOV/speed
+}
+
+void ACPP_PlayerCharacter::HandleMove(bool bIsLeftKey, ETriggerEvent Phase, const FInputActionValue& Value)
+{
+    bool& ThisHeld = bIsLeftKey ? bLeftHeld : bRightHeld;
+    bool& OtherHeld = bIsLeftKey ? bRightHeld : bLeftHeld;
+
+    // update held flags + when to recompute
+    switch (Phase)
+    {
+    case ETriggerEvent::Started:
+        ThisHeld = true;
+        break;
+
+    case ETriggerEvent::Triggered:
+        ThisHeld = true;
+        RecomputeAxisAndSpeed(); // does AddMovementInput + OnMoveAxisUpdated via parent
+        break;
+
+    case ETriggerEvent::Completed:
+        ThisHeld = false;
+        RecomputeAxisAndSpeed();
+        break;
+
+    default:
+        break;
+    }
+
+    const int Combined = GetCombinedAxis();               // -1,0,+1  (0 includes “both held”)
+    const bool bBoth = (bLeftHeld && bRightHeld);
+
+    // promote to Walk only if truly grounded and not currently an air state
+    if (Combined != 0 && IsGrounded() && !RR_IsAirState(CurrentMovementState))
+    {
+        ClearIdleConfirmTimer();
+        if (CurrentMovementState != EE_PlayerMovementState::Walk)
+        {
+            ChangeMovementState(EE_PlayerMovementState::Walk);
+        }
+    }
+
+    // both-keys bookkeeping (same as before, just centralized)
+    if (bBoth && !bWasBothHeld && IsGrounded())
+    {
+        ScheduleIdleConfirm();
+        bWasBothHeld = true;
+    }
+    if (!bBoth && bWasBothHeld)
+    {
+        ClearIdleConfirmTimer();
+        bWasBothHeld = false;
+    }
+
+    // when this key is released and the other isn’t held → consider idling
+    if (Phase == ETriggerEvent::Completed && !OtherHeld)
+    {
+        if (IsGrounded()) ScheduleIdleConfirm();
+    }
 }
 
 
