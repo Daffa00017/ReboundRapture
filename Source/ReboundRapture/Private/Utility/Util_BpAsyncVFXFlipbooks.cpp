@@ -1,11 +1,7 @@
 // Util_BpAsyncVFXFlipbooks.cpp
 
 #include "Utility/Util_BpAsyncVFXFlipbooks.h"
-
-// Paper2D
 #include "PaperFlipbook.h"
-
-// Streaming
 #include "Engine/AssetManager.h"
 #include "Engine/StreamableManager.h"
 #include "UObject/SoftObjectPath.h"

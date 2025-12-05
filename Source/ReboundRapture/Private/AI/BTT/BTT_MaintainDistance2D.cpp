@@ -46,7 +46,13 @@ void UBTT_MaintainDistance2D::TickTask(UBehaviorTreeComponent& OwnerComp, uint8*
 	const FVector To = Target->GetActorLocation();
 
 	const float d = DistXZ(Me, To);
-	const float dx = To.X - Me.X;
+	float       dx = To.X - Me.X; // <- make this non-const so we can tweak it
+
+	// If we're far but almost perfectly above/below the player, pick a side to move to
+	if (d > PreferMax + BandEpsilon && FMath::Abs(dx) < 30.f)
+	{
+		dx = (FMath::RandBool() ? 1.f : -1.f) * 30.f;
+	}
 
 	// Optional: helper lambdas to cleanly set state/speed
 	auto SetState = [P](EAIMovementState S)
@@ -59,7 +65,7 @@ void UBTT_MaintainDistance2D::TickTask(UBehaviorTreeComponent& OwnerComp, uint8*
 			{
 				if (auto* E = Cast<ACPP_EnemyParent>(P))
 				{
-					if (S == EAIMovementState::Run)  Move->MaxSpeed = E->RunSpeed;
+					if (S == EAIMovementState::Run)      Move->MaxSpeed = E->RunSpeed;
 					else if (S == EAIMovementState::Walk) Move->MaxSpeed = E->WalkSpeed;
 				}
 			}

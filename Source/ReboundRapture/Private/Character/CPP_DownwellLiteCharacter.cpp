@@ -146,6 +146,13 @@ void ACPP_DownwellLiteCharacter::Landed(const FHitResult& Hit)
         ChangeMovementState(EE_PlayerMovementState::Idle);
 }
 
+void ACPP_DownwellLiteCharacter::BeginPlay()
+{
+    Super::BeginPlay();
+
+
+}
+
 void ACPP_DownwellLiteCharacter::InputJumpReleased()
 {
     bJumpInput = false;

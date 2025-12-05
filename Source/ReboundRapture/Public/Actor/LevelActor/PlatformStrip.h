@@ -123,6 +123,12 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Collision")
     float GetCollisionHalfExtentX() const;
 
+    UPROPERTY(EditDefaultsOnly, Category = "Collision")
+    TEnumAsByte<ECollisionChannel> PlayerObjectChannel = ECC_Pawn;
+
+    UPROPERTY(EditDefaultsOnly, Category = "Collision")
+    TEnumAsByte<ECollisionChannel> ProjectileObjectChannel = ECC_Pawn;
+
     // assign sprites (variants) for each kind
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Visuals")
     UPaperSprite* SolidMiddle = nullptr;

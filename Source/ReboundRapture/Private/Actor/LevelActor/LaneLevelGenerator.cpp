@@ -929,6 +929,22 @@ void ALaneLevelGenerator::SpawnRuns(const TArray<FRowRun>& Runs,
 			// if (bDbgLog) UE_LOG(LogTemp, Warning, Fmt, Args...);
 		};
 
+	// NEW: only force Visibility block on tiles that currently BLOCK Pawn (solid ones).
+	// We do NOT change CollisionEnabled, so broken tiles can stay inert after damage.
+	auto EnsureVisibilityOnSolid = [&](APlatformStrip* P)
+		{
+			if (!P) return;
+			TInlineComponentArray<UPrimitiveComponent*> Comps(P);
+			for (UPrimitiveComponent* PC : Comps)
+			{
+				if (!PC) continue;
+				if (PC->GetCollisionResponseToChannel(ECC_Pawn) == ECR_Block)
+				{
+					PC->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
+				}
+			}
+		};
+
 	const int32 lanes = FMath::Max(NumLanes, 1);
 	const int32 safeTPL = FMath::Max(TilesPerLane, 1); // tiles per lane
 
@@ -1062,7 +1078,7 @@ void ALaneLevelGenerator::SpawnRuns(const TArray<FRowRun>& Runs,
 				if (i == 0 || out[i] != out[i - 1])
 					out[w++] = out[i];
 			}
-			out.SetNum(w, /*bAllowShrinking=*/false);
+			out.SetNum(w, EAllowShrinking::No);
 
 			return out;
 		};
@@ -1225,13 +1241,20 @@ void ALaneLevelGenerator::SpawnRuns(const TArray<FRowRun>& Runs,
 
 		if (BreakIdx.Num() > 0)
 		{
-			const bool bPerSegmentCollision = !bUsePlatformSafeMode; // segments only in normal mode
+			// Keep segment colliders so tiles are solid BEFORE they break
+			const bool bPerSegmentCollision = true;
 			Plat->BuildTiledByCount_WithBreaks(P.TilesWide, BreakIdx, bPerSegmentCollision);
+
+			// Only mark solid pieces as Visibility=Block (no changes to CollisionEnabled)
+			EnsureVisibilityOnSolid(Plat);
 		}
 		else
 		{
 			if (bUsePlatformSafeMode) Plat->BuildDebugFallback(P.TilesWide);
 			else                      Plat->BuildTiledByCount_Flex(P.TilesWide);
+
+			// Only mark solid pieces as Visibility=Block
+			EnsureVisibilityOnSolid(Plat);
 		}
 
 		// wall clamp

@@ -5,8 +5,9 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Pawn.h"
 #include "Engine/EngineTypes.h"
-#include "Enum/AIMovementState.h"
 #include "Components/HealthComponent.h"
+#include "Enum/AIMovementState.h"
+#include "Utility/Util_BpAsyncEnemyAnim.h"
 #include "CPP_EnemyParent.generated.h"
 
 class UCapsuleComponent;
@@ -15,9 +16,14 @@ class UPaperZDAnimSequence;
 class UPaperZDAnimInstance;
 class UPaperFlipbookComponent;
 class UFloatingPawnMovement;
-class HealthComponent;
+class UHealthComponent;
+class UUtil_BpAsyncEnemyAnim;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnAIMoveStateChanged, EAIMovementState, Old, EAIMovementState, New);
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnEnemyAnimsLoaded, const FEnemyAnimResolved&, LoadedAnims);
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnEnemyAnimsFailed);
 
 UCLASS()
 class REBOUNDRAPTURE_API ACPP_EnemyParent : public APawn
@@ -33,6 +39,18 @@ public:
 
 	// Called to bind functionality to input
 	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
+
+	UPROPERTY(BlueprintAssignable, Category = "Animations")
+	FOnEnemyAnimsLoaded OnAnimsReady;
+
+	/** * YOUR NEW DELEGATE: Fired if loading fails.
+	 */
+	UPROPERTY(BlueprintAssignable, Category = "Animations")
+	FOnEnemyAnimsFailed OnAnimsLoadFailed;
+
+	/** Stores the final loaded anims. Read-only for Blueprints. */
+	UPROPERTY(BlueprintReadOnly, Category = "Animations")
+	FEnemyAnimResolved ResolvedAnims;
 
 	// --- Components ---
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
@@ -90,27 +108,10 @@ public:
 	UFUNCTION(BlueprintCallable) bool IsActive() const { return bActive; }
 
 	UFUNCTION(BlueprintCallable)
-	void ActivateFromPool(const FVector& WorldPos)
-	{
-		SetActorLocation(WorldPos);
-		SetActorHiddenInGame(false);
-		SetActorTickEnabled(true);
-		SetActorEnableCollision(true);
-		bActive = true;
-		OnPooledActivated();
-		// reset movement / state here
-	}
+	virtual void ActivateFromPool(const FVector& WorldPos);
 
 	UFUNCTION(BlueprintCallable)
-	void DeactivateToPool()
-	{
-		SetActorHiddenInGame(true);
-		SetActorTickEnabled(false);
-		SetActorEnableCollision(false);
-		bActive = false;
-		OnPooledDeactivated();
-		// clear targets, velocities, etc.
-	}
+	virtual void DeactivateToPool();
 
 	// So Blueprint can just call this on “death” (no interface needed)
 	UFUNCTION(BlueprintCallable) void RequestDeactivate() 
@@ -125,6 +126,27 @@ public:
 protected:
 	// Called when the game starts or when spawned
 	virtual void BeginPlay() override;
+	
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Animations")
+	FName AnimationRowName;
 
+	/** * Set this in your Blueprint children.
+	 * This tells the class WHICH table to load from.
+	 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Animations")
+	UDataTable* AnimationDataTable;
+
+private:
+	/** This UPROPERTY() is crucial to stop the async action from being garbage collected. */
+	UPROPERTY()
+	UUtil_BpAsyncEnemyAnim* AnimLoadAction;
+
+	/** C++ function that is called by the async action on success */
+	UFUNCTION()
+	void HandleAnimsLoaded_Internal(FName RowName, const FEnemyAnimResolved& Anim);
+
+	/** C++ function that is called by the async action on failure */
+	UFUNCTION()
+	void HandleAnimLoadFailed_Internal();
 
 };

@@ -19,6 +19,7 @@ class REBOUNDRAPTURE_API ARR_DownwellPlayerController : public ACPP_PC_ReboundRa
 	
 public:
     virtual void BeginPlay() override;
+    virtual void Tick(float DeltaTime) override;
     virtual void SetupInputComponent() override;
 
     UPROPERTY(EditAnywhere, Category = "Input|IMC") UInputMappingContext* IMC_DownwellLite = nullptr;
@@ -26,6 +27,8 @@ public:
     UPROPERTY(EditAnywhere, Category = "Input|IA")  UInputAction* IA_MoveRight = nullptr;
     UPROPERTY(EditAnywhere, Category = "Input|IA")  UInputAction* IA_MoveDown = nullptr;
     UPROPERTY(EditAnywhere, Category = "Input|IA")  UInputAction* IA_Jump = nullptr;
+    UPROPERTY(EditDefaultsOnly, Category = "Input|IA") UInputAction* IA_MoveX = nullptr;
+    UPROPERTY(EditDefaultsOnly, Category = "Input|IA") UInputAction* IA_Steer = nullptr;
 
 private:
     // held state (mirrors your character code, but lives in the controller)
@@ -47,6 +50,12 @@ private:
     void OnJumpStarted(const struct FInputActionValue&);
     void OnJumpTriggered(const struct FInputActionValue&);
     void OnJumpCompleted(const struct FInputActionValue&);
+
+    void OnMoveX_Triggered(const struct FInputActionValue& Value);
+    void OnMoveX_Completed(const struct FInputActionValue& Value);
+
+    void OnSteer_Triggered(const struct FInputActionValue& Value);
+    void OnSteer_Completed(const struct FInputActionValue& Value);
 
     void SendCombinedAxis(); // compute (-1,0,+1) and forward
 

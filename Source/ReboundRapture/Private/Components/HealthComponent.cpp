@@ -23,7 +23,8 @@ void UHealthComponent::BeginPlay()
 	Super::BeginPlay();
 	CanRegenerate = false;
 	// ...
-	
+	SetCurrentHealth(MaxHealth);
+
 }
 
 
@@ -44,7 +45,6 @@ void UHealthComponent::AddHealth(float Amount)
 		OnDead.Broadcast();
 	}
 	OnHealthChange.Broadcast(CurrentHealth);
-	
 }
 
 void UHealthComponent::SetMaxHealth(float NewMaxHealth)
@@ -99,6 +99,20 @@ void UHealthComponent::BasicAhhRecovery()
 		}
 	}
 
+void UHealthComponent::StartMercyInvicible()
+{
+	IsMercyInvicible = true;
+	GetWorld()->GetTimerManager().SetTimer
+	(
+		Th_MercyInvicTimer,
+		this,
+		&UHealthComponent::Timer_StopMercyInvicible,
+		MercyInvincibilityDuration,  // Now clearly different from member variable
+		true,
+		MercyInvincibilityDuration
+	);
+}
+
 
 void UHealthComponent::Timer_RegenerateHealth()
 {
@@ -112,5 +126,10 @@ void UHealthComponent::Timer_RegenerateHealth()
 			DoneRecovery.Broadcast();
 		}
 		
+}
+
+void UHealthComponent::Timer_StopMercyInvicible()
+{
+	IsMercyInvicible = false;
 }
 

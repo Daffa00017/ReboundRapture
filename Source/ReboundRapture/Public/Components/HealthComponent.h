@@ -32,9 +32,15 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Health")
 	float RegenerateDuration = 3.0f;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Health")
+	float MercyInvincibilityDuration = 3.0f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Health")
 	bool CanRegenerate = false;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Health")
+	bool IsMercyInvicible = false;
 	UPROPERTY(BlueprintReadWrite, Category = "Health")
 	FTimerHandle Th_RecoveryTimer;
+	UPROPERTY(BlueprintReadWrite, Category = "Health")
+	FTimerHandle Th_MercyInvicTimer;
 
 
 
@@ -55,8 +61,12 @@ public:
 	void StartRegenerateHealth();
 	UFUNCTION(BlueprintCallable, Category = "Health")
 	void BasicAhhRecovery();
+	UFUNCTION(BlueprintCallable, Category = "Health")
+	void StartMercyInvicible();
 	UFUNCTION()
 	void Timer_RegenerateHealth();
+	UFUNCTION()
+	void Timer_StopMercyInvicible();
 	
 	UFUNCTION(BlueprintCallable, Category = "Health")
 	float GetCurrentHealth() const { return CurrentHealth; }

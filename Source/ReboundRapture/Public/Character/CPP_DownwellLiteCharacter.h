@@ -19,6 +19,8 @@ public:
 	ACPP_DownwellLiteCharacter();
 	virtual void Landed(const FHitResult& Hit) override;
 
+	virtual void BeginPlay() override;
+
 	UFUNCTION(BlueprintNativeEvent, Category = "Movement")
 	void CustomEventOnLanded(FHitResult HitResult);
 

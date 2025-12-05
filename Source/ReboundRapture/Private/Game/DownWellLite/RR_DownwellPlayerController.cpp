@@ -4,6 +4,8 @@
 #include "Game/DownWellLite/RR_DownwellPlayerController.h"
 #include "EnhancedInputSubsystems.h"
 #include "EnhancedInputComponent.h"
+#include "GameFramework/PlayerController.h"
+#include "InputCoreTypes.h"
 #include "Character/CPP_DownwellLiteCharacter.h"
 
 void ARR_DownwellPlayerController::BeginPlay()
@@ -12,6 +14,16 @@ void ARR_DownwellPlayerController::BeginPlay()
     if (ULocalPlayer* LP = GetLocalPlayer())
         if (auto* Sub = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(LP))
             if (IMC_DownwellLite) Sub->AddMappingContext(IMC_DownwellLite, 1);
+}
+
+void ARR_DownwellPlayerController::Tick(float DeltaTime)
+{
+    Super::Tick(DeltaTime);
+    static const FKey WheelAxisKey(TEXT("RawInput.Axis0")); // replace with your key
+    const float v = GetInputAnalogKeyState(WheelAxisKey);
+
+    GEngine->AddOnScreenDebugMessage(-1, 0.f, FColor::Cyan,
+        FString::Printf(TEXT("Wheel = %.3f"), v));
 }
 
 
@@ -33,6 +45,19 @@ void ARR_DownwellPlayerController::SetupInputComponent()
             EIC->BindAction(IA_MoveRight, ETriggerEvent::Triggered, this, &ARR_DownwellPlayerController::OnRightTriggered);
             EIC->BindAction(IA_MoveRight, ETriggerEvent::Completed, this, &ARR_DownwellPlayerController::OnRightCompleted);
         }
+
+        if (IA_MoveX)
+        {
+            EIC->BindAction(IA_MoveX, ETriggerEvent::Triggered, this, &ThisClass::OnMoveX_Triggered);
+            EIC->BindAction(IA_MoveX, ETriggerEvent::Completed, this, &ThisClass::OnMoveX_Completed);
+        }
+
+        if (IA_Steer)
+        {
+            EIC->BindAction(IA_Steer, ETriggerEvent::Triggered, this, &ThisClass::OnSteer_Triggered);
+            EIC->BindAction(IA_Steer, ETriggerEvent::Completed, this, &ThisClass::OnSteer_Completed);
+        }
+
         if (IA_Jump)
         {
             EIC->BindAction(IA_Jump, ETriggerEvent::Started, this, &ARR_DownwellPlayerController::OnJumpStarted);
@@ -134,4 +159,40 @@ void ARR_DownwellPlayerController::OnJumpCompleted(const FInputActionValue&)
 { 
     if (auto* C = GetDWChar()) 
         C->InputJumpReleased(); 
+}
+
+void ARR_DownwellPlayerController::OnMoveX_Triggered(const FInputActionValue& Value)
+{
+    float Axis = FMath::Clamp(Value.Get<float>(), -1.f, 1.f);
+    // Safety deadzone (optional; IMC deadzone should already handle it)
+    if (FMath::Abs(Axis) < 0.2f) Axis = 0.f;
+
+    if (auto* C = GetDWChar())
+        C->SetMoveAxis(Axis);
+}
+
+void ARR_DownwellPlayerController::OnMoveX_Completed(const FInputActionValue& Value)
+{
+    if (auto* C = GetDWChar())
+        C->SetMoveAxis(0.f);
+}
+
+void ARR_DownwellPlayerController::OnSteer_Triggered(const FInputActionValue& Value)
+{
+    float Axis = FMath::Clamp(Value.Get<float>(), -1.f, 1.f);
+    // Optional safety deadzone if your IMC deadzone is low:
+    if (FMath::Abs(Axis) < 0.06f) Axis = 0.f;
+    const float x = Value.Get<float>();
+    UE_LOG(LogTemp, Log, TEXT("Steering = %.3f"), x);
+
+
+    if (auto* C = GetDWChar())
+        C->SetMoveAxis(Axis);
+
+}
+
+void ARR_DownwellPlayerController::OnSteer_Completed(const FInputActionValue& Value)
+{
+    if (auto* C = GetDWChar())
+        C->SetMoveAxis(0.f);
 }

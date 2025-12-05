@@ -20,8 +20,10 @@ APlatformStrip::APlatformStrip()
     Box->SetupAttachment(Root);
     Box->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
     Box->SetCollisionResponseToAllChannels(ECR_Ignore);
-    Box->SetCollisionResponseToChannel(ECC_Pawn, ECR_Block);
+    Box->SetCollisionResponseToChannel(PlayerObjectChannel, ECR_Block);
+    Box->SetCollisionResponseToChannel(ProjectileObjectChannel, ECR_Block);
     Box->SetCollisionResponseToChannel(ECC_WorldStatic, ECR_Block);
+    Box->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
 
     Sprite = CreateDefaultSubobject<UPaperSpriteComponent>(TEXT("Sprite"));
     Sprite->SetupAttachment(Root);
@@ -138,6 +140,10 @@ void APlatformStrip::RebuildSegmentCollision()
             B->SetCollisionObjectType(ECC_WorldStatic);
         }
         B->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+        B->SetCollisionResponseToChannel(ECC_Pawn, ECR_Block);
+        B->SetCollisionResponseToChannel(PlayerObjectChannel, ECR_Block);  // <-- add
+        B->SetCollisionResponseToChannel(ProjectileObjectChannel, ECR_Block);
+        B->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
 
         B->SetBoxExtent(FVector(halfX, halfY, halfZ), /*update=*/true);
         B->SetRelativeLocation(FVector(centerX, centerShiftY, 0.f));
@@ -427,6 +433,11 @@ void APlatformStrip::BuildTiledByCount_WithBreaks(int32 Count, const TArray<int3
             B->SetCollisionObjectType(ECC_WorldStatic);
         }
         B->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+        B->SetCollisionResponseToChannel(ECC_Pawn, ECR_Block);
+        B->SetCollisionResponseToChannel(PlayerObjectChannel, ECR_Block);  // <-- add
+        B->SetCollisionResponseToChannel(ProjectileObjectChannel, ECR_Block);        // player/enemies fall through
+        B->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
+        B->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
 
         const float halfX = FMath::Max(0.5f * BuiltTileW, 2.f); // EXACT tile width
         const float centerX = BuiltLeftX + float(i) * BuiltTileW; // tile center
@@ -465,7 +476,11 @@ void APlatformStrip::BreakTile(int32 TileIndex)
     // disable only that tile’s collider
     if (SegmentBoxes.IsValidIndex(TileIndex) && SegmentBoxes[TileIndex])
     {
-        SegmentBoxes[TileIndex]->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+        UBoxComponent* SB = SegmentBoxes[TileIndex];
+        SB->SetCollisionEnabled(ECollisionEnabled::QueryOnly);                // still traceable, no physical block
+        SB->SetCollisionResponseToChannel(PlayerObjectChannel, ECR_Ignore);        // player/enemies fall through
+        SB->SetCollisionResponseToChannel(ProjectileObjectChannel, ECR_Ignore);        // player/enemies fall through
+        SB->SetCollisionResponseToChannel(ECC_Visibility, ECR_Ignore);        // walkers “see” a hole/ledge here
     }
 }
 
